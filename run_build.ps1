@@ -11,7 +11,7 @@ Write-Host "Updating Pip..."
 .\venv\Scripts\python -m pip install --upgrade pip
 
 Write-Host "Installing Requirements from pypi.org..."
-.\venv\Scripts\python -m pip install PyQt6 oracledb pyinstaller
+.\venv\Scripts\python -m pip install -r requirements.txt
 
 Write-Host "Starting PyInstaller Building Process..."
 .\venv\Scripts\python build_exe.py

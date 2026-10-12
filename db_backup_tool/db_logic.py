@@ -730,14 +730,16 @@ def validate_table_exports(config, table_exports):
 
 
 def export_ddl_task(config, export_dir, selected_objects, progress_callback, log_callback,
-                    should_stop=None, name_filter="", table_exports=None, daily_subdir=False):
+                    should_stop=None, name_filter="", table_exports=None, daily_subdir=False,
+                    git_config=None):
     """
     Export selected DDL objects and optional table data scripts.
     selected_objects: {oracle_type: list_of_names or None}
     table_exports: [{"table": "TABLE_NAME", "where": "WHERE ..."}]
     """
-    if daily_subdir:
-        export_dir = os.path.join(export_dir, datetime.date.today().isoformat())
+    date_folder = datetime.date.today().isoformat() if daily_subdir else ""
+    if date_folder:
+        export_dir = os.path.join(export_dir, date_folder)
     log_callback(f"备份目录：{export_dir}")
     db = DatabaseManager(config["user"], config["password"], config["conn_str"])
     ok, msg = db.connect()
@@ -771,6 +773,7 @@ def export_ddl_task(config, export_dir, selected_objects, progress_callback, log
 
         log_callback(f"找到 {total} 个对象/表待导出...")
         current = 0
+        exported_files = []
 
         for oracle_type, names in target_list:
             folder_name = oracle_type.replace(" ", "_")
@@ -787,6 +790,7 @@ def export_ddl_task(config, export_dir, selected_objects, progress_callback, log
                 ddl = db.get_ddl(oracle_type, name)
                 with open(os.path.join(type_dir, f"{name}.sql"), "w", encoding="utf-8") as f:
                     f.write(ddl)
+                exported_files.append(f"{folder_name}/{name}.sql")
                 current += 1
                 progress_callback(int(current / total * 100))
 
@@ -808,11 +812,27 @@ def export_ddl_task(config, export_dir, selected_objects, progress_callback, log
                     os.path.join(data_dir, f"{table_name}.sql"),
                     should_stop=should_stop,
                 )
+                if should_stop and should_stop():
+                    return f"已中止，已完成 {current}/{total} 个对象/表；未上传 Git。"
+                exported_files.append(f"DATA/{table_name}.sql")
                 log_callback(f"  {table_name}: 已导出 {rows} 行")
                 current += 1
                 progress_callback(int(current / total * 100))
 
-        return f"导出成功，共导出 {total} 个对象/表。"
+        message = f"导出成功，共导出 {total} 个对象/表。"
+        if git_config and git_config.get("enabled"):
+            if should_stop and should_stop():
+                return "本地备份已完成；已取消 Git 上传。"
+            from git_backup import upload_backup
+            try:
+                git_message = upload_backup(export_dir, git_config, log_callback,
+                                            files=exported_files, date_folder=date_folder,
+                                            should_stop=should_stop)
+            except Exception as error:
+                raise Exception(f"本地备份已完成；{error}") from None
+            log_callback(git_message)
+            message += "\n" + git_message
+        return message
     finally:
         db.close()
 

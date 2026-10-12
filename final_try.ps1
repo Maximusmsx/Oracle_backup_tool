@@ -9,14 +9,14 @@ $env:all_proxy=$null
 cd "db_backup_tool"
 
 Write-Host "Step 1: Attempting to install requirements via Tsinghua mirror..."
-python -m pip install PyQt6 oracledb pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
+python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Success! Building EXE..."
     python build_exe.py
 } else {
     Write-Host "Tsinghua failed. Step 2: Trying Alibaba mirror..."
-    python -m pip install PyQt6 oracledb pyinstaller -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
+    python -m pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
     if ($LASTEXITCODE -eq 0) {
         python build_exe.py
     } else {

@@ -1,3 +1,4 @@
 PyQt6==6.7.0
 oracledb==2.2.0
 pyinstaller==6.6.0
+dulwich==0.25.0

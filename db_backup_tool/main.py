@@ -1,14 +1,16 @@
 ﻿import sys
 import json
 import os
+import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QFileDialog, QTreeWidget,
     QTreeWidgetItem, QProgressBar, QMessageBox, QTextEdit, QComboBox,
-    QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox
+    QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QGroupBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from db_logic import DatabaseManager, export_ddl_task, OBJECT_CATEGORIES, validate_table_exports
+from git_backup import protect_secret, reveal_secret, validate_git_config, upload_backup
 
 PLACEHOLDER_DATA = "__placeholder__"
 
@@ -30,7 +32,7 @@ class BackupWorker(QThread):
     finished = pyqtSignal(bool, str)
 
     def __init__(self, db_config, export_dir, selected_objects, name_filter="", table_exports=None,
-                 daily_subdir=False):
+                 daily_subdir=False, git_config=None):
         super().__init__()
         self.db_config = db_config
         self.export_dir = export_dir
@@ -38,6 +40,7 @@ class BackupWorker(QThread):
         self.name_filter = name_filter
         self.table_exports = table_exports or []
         self.daily_subdir = daily_subdir
+        self.git_config = git_config
 
     def run(self):
         try:
@@ -48,6 +51,7 @@ class BackupWorker(QThread):
                 name_filter=self.name_filter,
                 table_exports=self.table_exports,
                 daily_subdir=self.daily_subdir,
+                git_config=self.git_config,
             )
             self.finished.emit(True, msg)
         except Exception as e:
@@ -92,19 +96,40 @@ class AllProfilesWorker(QThread):
                     name_filter=p.get("filter_text", "").strip(),
                     table_exports=p.get("table_exports", []),
                     daily_subdir=p.get("daily_subdir", False),
+                    git_config=p.get("git", {}),
                 )
                 self.log.emit(f"  [{name}] {msg}")
                 done += 1
             except Exception as e:
                 self.log.emit(f"  [{name}] 导出失败：{e}")
-        self.finished.emit(True, f"所有配置导出完毕，共 {total} 个")
+        self.finished.emit(done == total, f"所有配置处理完毕，成功 {done}/{total} 个；失败或跳过 {total-done} 个，详情见日志")
+
+
+class GitUploadWorker(QThread):
+    log = pyqtSignal(str)
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, export_dir, options, daily_subdir):
+        super().__init__()
+        self.export_dir = export_dir
+        self.options = options
+        self.date_folder = datetime.date.today().isoformat() if daily_subdir else ""
+
+    def run(self):
+        try:
+            directory = os.path.join(self.export_dir, self.date_folder) if self.date_folder else self.export_dir
+            message = upload_backup(directory, self.options, self.log.emit,
+                                    date_folder=self.date_folder, should_stop=self.isInterruptionRequested)
+            self.finished.emit(True, message)
+        except Exception as error:
+            self.finished.emit(False, str(error))
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("数据库 DDL 备份工具")
-        self.resize(820, 720)
+        self.resize(820, 880)
         self.profiles = {}       # {name: {user, password, conn_str, export_dir, selected_objects}}
         self.current_profile = ""
         self.db_manager = None
@@ -186,6 +211,38 @@ class MainWindow(QMainWindow):
         layout.addLayout(h2)
         self.daily_subdir = QCheckBox("按日建目录（yyyy-mm-dd）")
         layout.addWidget(self.daily_subdir)
+
+        self.git_group = QGroupBox("备份完成后上传 Git（HTTP／HTTPS，无需安装 Git）")
+        self.git_group.setCheckable(True)
+        self.git_group.setChecked(False)
+        git_layout = QVBoxLayout(self.git_group)
+        self.git_url = QLineEdit()
+        self.git_url.setPlaceholderText("仓库地址，例如 https://git.example.com/team/backup.git")
+        git_layout.addWidget(self.git_url)
+        git_path_row = QHBoxLayout()
+        git_path_row.addWidget(QLabel("分支"))
+        self.git_branch = QLineEdit("main")
+        self.git_branch.setMaximumWidth(140)
+        git_path_row.addWidget(self.git_branch)
+        git_path_row.addWidget(QLabel("仓库子目录"))
+        self.git_folder = QLineEdit("backup")
+        self.git_folder.setPlaceholderText("各配置使用不同目录，例如 backups/学校A")
+        git_path_row.addWidget(self.git_folder)
+        git_layout.addLayout(git_path_row)
+        git_auth_row = QHBoxLayout()
+        git_auth_row.addWidget(QLabel("用户名"))
+        self.git_username = QLineEdit()
+        git_auth_row.addWidget(self.git_username)
+        git_auth_row.addWidget(QLabel("密码／Token"))
+        self.git_password = QLineEdit()
+        self.git_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.git_password.setPlaceholderText("GitHub 使用 Token；保存时绑定当前 Windows 用户加密")
+        git_auth_row.addWidget(self.git_password)
+        self.btn_git_upload = QPushButton("上传现有备份")
+        self.btn_git_upload.clicked.connect(self.start_git_upload)
+        git_auth_row.addWidget(self.btn_git_upload)
+        git_layout.addLayout(git_auth_row)
+        layout.addWidget(self.git_group)
 
         layout.addWidget(QLabel("3. 导出对象选择"))
         self.tabs = QTabWidget()
@@ -357,6 +414,17 @@ class MainWindow(QMainWindow):
         self.conn_str.setText(p.get("conn_str", ""))
         self.dir_path.setText(p.get("export_dir", ""))
         self.daily_subdir.setChecked(p.get("daily_subdir", False))
+        git = p.get("git", {})
+        self.git_group.setChecked(git.get("enabled", False))
+        self.git_url.setText(git.get("url", ""))
+        self.git_branch.setText(git.get("branch", "main"))
+        self.git_folder.setText(git.get("folder", name.replace("/", "_").replace("\\", "_").replace(":", "_")))
+        self.git_username.setText(git.get("username", ""))
+        try:
+            self.git_password.setText(reveal_secret(git.get("password_protected", "")))
+        except Exception as error:
+            self.git_password.clear()
+            self.log_output.append(str(error))
         self._build_tree(saved_selections=p.get("selected_objects", {}))
         self._build_table_data_grid(saved_exports=p.get("table_exports", []))
         self.filter_input.setText(p.get("filter_text", ""))
@@ -462,8 +530,9 @@ class MainWindow(QMainWindow):
             return
         try:
             table_exports = self._collect_table_exports(validate_where=True)
+            git_config = self._collect_git_config()
         except Exception as e:
-            QMessageBox.critical(self, "表数据导出条件错误", str(e))
+            QMessageBox.critical(self, "配置错误", str(e))
             return
         is_new = name not in self.profiles
         self.profiles[name] = {
@@ -472,6 +541,7 @@ class MainWindow(QMainWindow):
             "conn_str": self.conn_str.text(),
             "export_dir": self.dir_path.text(),
             "daily_subdir": self.daily_subdir.isChecked(),
+            "git": git_config,
             "selected_objects": self._collect_selections(),
             "table_exports": table_exports,
             "filter_text": self.filter_input.text(),
@@ -682,6 +752,44 @@ class MainWindow(QMainWindow):
             self._write_config()
 
     # ── 浏览目录 / 导出 ─────────────────────────────
+    def _collect_git_config(self):
+        options = {
+            "enabled": self.git_group.isChecked(),
+            "url": self.git_url.text().strip(),
+            "branch": self.git_branch.text().strip(),
+            "folder": self.git_folder.text().strip(),
+            "username": self.git_username.text().strip(),
+            "password_protected": protect_secret(self.git_password.text()),
+        }
+        validate_git_config(options)
+        return options
+
+    def start_git_upload(self):
+        try:
+            options = self._collect_git_config()
+            if not options["enabled"] or not self.dir_path.text().strip():
+                raise ValueError("请启用 Git 上传并填写备份目录")
+        except Exception as error:
+            QMessageBox.critical(self, "Git 配置错误", str(error))
+            return
+        self.btn_git_upload.setEnabled(False)
+        self.btn_export.setEnabled(False)
+        self.btn_all_export.setEnabled(False)
+        self.git_worker = GitUploadWorker(self.dir_path.text().strip(), options, self.daily_subdir.isChecked())
+        self.git_worker.log.connect(self.log_output.append)
+        self.git_worker.finished.connect(self.on_git_upload_finished)
+        self.git_worker.start()
+
+    def on_git_upload_finished(self, success, message):
+        self.btn_git_upload.setEnabled(True)
+        self.btn_export.setEnabled(True)
+        self.btn_all_export.setEnabled(True)
+        self.log_output.append(message)
+        if success:
+            QMessageBox.information(self, "Git 上传完成", message)
+        else:
+            QMessageBox.critical(self, "Git 上传失败", message)
+
     def browse_directory(self):
         d = QFileDialog.getExistingDirectory(self, "选择备份目录")
         if d:
@@ -754,8 +862,9 @@ class MainWindow(QMainWindow):
         selected = self._collect_export_targets()
         try:
             table_exports = self._collect_table_exports(validate_where=True)
+            git_config = self._collect_git_config()
         except Exception as e:
-            QMessageBox.critical(self, "表数据导出条件错误", str(e))
+            QMessageBox.critical(self, "导出配置错误", str(e))
             return
         self.btn_export.setText("停止导出")
         self.btn_export.setStyleSheet(
@@ -764,6 +873,7 @@ class MainWindow(QMainWindow):
         )
         self.btn_export.setEnabled(True)
         self.btn_all_export.setEnabled(False)
+        self.btn_git_upload.setEnabled(False)
         self.progress_bar.setValue(0)
         self.log_output.clear()
 
@@ -777,6 +887,7 @@ class MainWindow(QMainWindow):
             name_filter=self.filter_input.text().strip(),
             table_exports=table_exports,
             daily_subdir=self.daily_subdir.isChecked(),
+            git_config=git_config,
         )
         self.worker.progress.connect(self.progress_bar.setValue)
         self.worker.log.connect(self.log_output.append)
@@ -784,6 +895,7 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def on_export_finished(self, success, msg):
+        self.btn_git_upload.setEnabled(True)
         self.btn_export.setEnabled(True)
         self.btn_export.setText("导出当前配置")
         self.btn_export.setStyleSheet(
@@ -822,6 +934,7 @@ class MainWindow(QMainWindow):
         )
         self.btn_all_export.setEnabled(True)
         self.btn_export.setEnabled(False)
+        self.btn_git_upload.setEnabled(False)
         self.progress_bar.setValue(0)
         self.log_output.clear()
         self.all_worker = AllProfilesWorker(dict(self.profiles))
@@ -831,6 +944,7 @@ class MainWindow(QMainWindow):
         self.all_worker.start()
 
     def on_all_export_finished(self, success, msg):
+        self.btn_git_upload.setEnabled(True)
         self.btn_all_export.setEnabled(True)
         self.btn_all_export.setText("导出所有配置")
         self.btn_all_export.setStyleSheet(
@@ -838,7 +952,10 @@ class MainWindow(QMainWindow):
             "min-height: 30px; min-width: 120px;"
         )
         self.btn_export.setEnabled(True)
-        QMessageBox.information(self, "完成", msg)
+        if success:
+            QMessageBox.information(self, "完成", msg)
+        else:
+            QMessageBox.warning(self, "部分配置未完成", msg)
 
     # ── 删除配置 ─────────────────────────────────────
     def delete_current_profile(self):
@@ -861,6 +978,16 @@ class MainWindow(QMainWindow):
             self.combo_profile.setEditText("")
             self._build_tree()
             self._build_table_data_grid()
+
+    def closeEvent(self, event):
+        if any(getattr(self, name, None) and getattr(self, name).isRunning()
+               for name in ("worker", "all_worker", "git_worker")):
+            QMessageBox.warning(self, "任务进行中", "请等待备份或上传结束后再关闭程序。")
+            event.ignore()
+            return
+        if self.db_manager:
+            self.db_manager.close()
+        event.accept()
 
 
 if __name__ == "__main__":

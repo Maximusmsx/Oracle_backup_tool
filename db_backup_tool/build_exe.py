@@ -16,6 +16,7 @@ params = [
     f"--specpath={current_dir}",
     "--collect-all=cryptography",
     "--collect-all=oracledb",
+    "--collect-all=dulwich",
     "--hidden-import=uuid",
     "--hidden-import=cffi",
     "--hidden-import=cryptography",
