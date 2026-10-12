@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build_env/
+build*/
+dist/
+oracle_client/
+*.spec
+*.log
+*.exe
+*.zip
+*.rar
+config.json
+.env
+.env.*
