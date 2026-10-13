@@ -8,7 +8,7 @@ import tempfile
 import time
 from urllib.parse import urlsplit
 
-from dulwich.client import get_transport_and_path
+from dulwich.client import get_transport_and_path, HTTPUnauthorized
 from dulwich.config import ConfigDict
 from dulwich.index import commit_tree
 from dulwich.object_store import iter_tree_contents
@@ -76,6 +76,8 @@ def validate_git_config(options):
         raise GitBackupError("请填写仓库子目录，例如 backups/学校A；不能使用绝对路径或 ..")
     if ":" in options.get("username", "") or any(ord(c) < 32 for c in folder + branch):
         raise GitBackupError("Git 用户名或路径包含不合法字符")
+    if url.hostname.lower() == "github.com" and "@" in options.get("username", ""):
+        raise GitBackupError("GitHub 用户名请填写账号名，不是登录邮箱；密码／Token 请填写有仓库写入权限的 Token")
 
 
 def collect_backup_files(export_dir):
@@ -175,6 +177,10 @@ def upload_backup(export_dir, options, log_callback, files=None, date_folder="",
     except GitBackupError:
         raise
     except Exception as error:
+        if isinstance(error, HTTPUnauthorized):
+            if urlsplit(options["url"]).hostname.lower() == "github.com":
+                raise GitBackupError("GitHub 认证失败：请使用 GitHub 账号名＋有仓库写入权限的 Token，不能使用登录密码；本地备份已保留") from None
+            raise GitBackupError("Git 服务认证失败，请检查用户名及密码／Token是否有效；本地备份已保留") from None
         # HTTP errors may contain authentication values; do not display their raw text.
         raise GitBackupError(f"Git 上传失败（{type(error).__name__}），请检查网络、仓库地址和凭据；本地备份已保留") from None
     finally:

@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import Mock, patch
 from wsgiref.simple_server import make_server, WSGIRequestHandler
 
-from dulwich.client import get_transport_and_path
+from dulwich.client import get_transport_and_path, HTTPUnauthorized
 from dulwich.index import commit_tree
 from dulwich.object_store import iter_tree_contents
 from dulwich.objects import Blob, Commit
@@ -125,6 +125,7 @@ class GitBackupTest(unittest.TestCase):
             upload_backup(str(self.backup), wrong, Mock())
         self.assertNotIn("bad-password", str(error.exception))
         self.assertFalse(b"refs/heads/main" in self.repo.refs)
+
         factory = get_transport_and_path
 
         def race(*args, **kwargs):
@@ -135,6 +136,17 @@ class GitBackupTest(unittest.TestCase):
         with patch("git_backup.get_transport_and_path", side_effect=race), self.assertRaisesRegex(GitBackupError, "远端分支已变化"):
             upload_backup(str(self.backup), self.options, Mock())
         self.assertFalse(b"refs/heads/main" in self.repo.refs)
+
+    def test_github_authentication_guidance(self):
+        options = dict(self.options, url="https://github.com/example/backup.git")
+        with self.assertRaisesRegex(GitBackupError, "不是登录邮箱"):
+            validate_git_config(dict(options, username="user@example.com"))
+        client = Mock()
+        client.fetch.side_effect = HTTPUnauthorized(None, "https://example.com/sensitive-error-text")
+        with patch("git_backup.get_transport_and_path", return_value=(client, "/backup.git")):
+            with self.assertRaisesRegex(GitBackupError, "不能使用登录密码") as error:
+                upload_backup(str(self.backup), options, Mock())
+            self.assertNotIn("sensitive-error-text", str(error.exception))
 
     def test_cancelled_or_invalid_ddl_never_autouploads(self):
         db = Mock()

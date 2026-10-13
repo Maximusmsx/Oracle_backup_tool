@@ -235,6 +235,7 @@ class MainWindow(QMainWindow):
         git_auth_row = QHBoxLayout()
         git_auth_row.addWidget(QLabel("用户名"))
         self.git_username = QLineEdit()
+        self.git_username.setPlaceholderText("GitHub 填账号名，不是登录邮箱")
         git_auth_row.addWidget(self.git_username)
         git_auth_row.addWidget(QLabel("密码／Token"))
         self.git_password = QLineEdit()
