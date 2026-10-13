@@ -4,6 +4,8 @@ Windows 上的 Oracle 数据库备份工具，使用 Python、PyQt6 和 python-o
 
 支持多份连接配置、数据库对象按需加载与筛选、DDL 导出、表数据 SQL 导出、按 `yyyy-mm-dd` 建立备份子目录，以及备份完成后提交并推送到 Git。
 
+对象列表与导出范围限定为当前连接用户自有的 schema（使用 `USER_*` 字典视图）。以 LXD 登录时不显示 APEX、CWBS 等其他 schema 的对象；旧配置保存的跨 schema 勾选也会被过滤。数据库链接名称自身包含的域名点号保留。
+
 ## Git 备份
 
 每份配置可独立设置 Git 上传开关、HTTP／HTTPS 仓库地址、分支、仓库子目录、用户名和密码／Token。GitHub 使用 Token，自建 Git 服务可使用其支持的密码或 Token。Git 功能使用 Dulwich，分发的 EXE 无需目标机器安装 Git、Python 或 SSH 客户端。

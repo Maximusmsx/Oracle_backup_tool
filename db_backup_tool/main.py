@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QGroupBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from db_logic import DatabaseManager, export_ddl_task, OBJECT_CATEGORIES, validate_table_exports
+from db_logic import DatabaseManager, export_ddl_task, OBJECT_CATEGORIES, validate_table_exports, own_object_name
 from git_backup import protect_secret, reveal_secret, validate_git_config, upload_backup
 
 PLACEHOLDER_DATA = "__placeholder__"
@@ -408,6 +408,11 @@ class MainWindow(QMainWindow):
         self.lbl_status.setText("● 未连接")
         self.lbl_status.setStyleSheet("color: gray; font-weight: bold;")
         p = self.profiles[name]
+        for kind, names in p.get("selected_objects", {}).items():
+            if isinstance(names, list):
+                p["selected_objects"][kind] = [own_object_name(p.get("user", ""), item, kind)
+                                               for item in names
+                                               if own_object_name(p.get("user", ""), item, kind)]
         self.current_profile = name
         self.u_name.setText(p.get("user", ""))
         self.u_pwd.setText(p.get("password", ""))
@@ -439,9 +444,9 @@ class MainWindow(QMainWindow):
     def _build_table_data_grid(self, table_names=None, saved_exports=None):
         saved_exports = saved_exports or []
         saved_map = {
-            (item.get("table") or "").strip().upper(): item.get("where", "")
+            own_object_name(self.u_name.text(), (item.get("table") or "").strip().upper()): item.get("where", "")
             for item in saved_exports
-            if (item.get("table") or "").strip()
+            if own_object_name(self.u_name.text(), (item.get("table") or "").strip().upper())
         }
         names = [n.upper() for n in (table_names or [])]
         for saved_name in saved_map:

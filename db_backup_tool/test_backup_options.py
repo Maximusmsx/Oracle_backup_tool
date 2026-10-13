@@ -21,7 +21,9 @@ class BackupOptionsTest(unittest.TestCase):
             window = main.MainWindow()
             window.profiles = {
                 "A": {"user": "A", "password": "test", "conn_str": "db-a"},
-                "B": {"user": "B", "password": "test", "conn_str": "db-b", "selected_objects": {"TABLE": ["B_TABLE"]}},
+                "B": {"user": "B", "password": "test", "conn_str": "db-b",
+                      "selected_objects": {"TABLE": ["B.B_TABLE", "CWBS.OTHER"]},
+                      "table_exports": [{"table": "CWBS.OTHER"}, {"table": "B.B_TABLE"}]},
             }
             window._populate_combo()
             window._load_profile("A")
@@ -32,6 +34,9 @@ class BackupOptionsTest(unittest.TestCase):
             old.close.assert_called_once()
             self.assertIsNone(window.db_manager)
             self.assertIn("未连接", window.lbl_status.text())
+            self.assertEqual(window.profiles["B"]["selected_objects"]["TABLE"], ["B_TABLE"])
+            self.assertEqual(window.table_data_grid.rowCount(), 1)
+            self.assertEqual(window.table_data_grid.item(0, 0).text(), "B_TABLE")
             new = Mock(use_thick=False)
             new.connect.return_value = (True, "OK")
             new.get_objects_by_type.return_value = ["B_TABLE"]

@@ -170,15 +170,6 @@ SPECIAL_QUERIES = {
     "SCHEDULE":     "SELECT schedule_name FROM user_scheduler_schedules ORDER BY schedule_name",
     "PROGRAM":      "SELECT program_name FROM user_scheduler_programs ORDER BY program_name",
     "CHAIN":        "SELECT chain_name FROM user_scheduler_chains ORDER BY chain_name",
-    "WINDOW":       "SELECT window_name FROM dba_scheduler_windows ORDER BY window_name",
-    "WINDOW GROUP": "SELECT window_group_name FROM dba_scheduler_window_groups ORDER BY window_group_name",
-    "JOB CLASS":    "SELECT job_class_name FROM dba_scheduler_job_classes ORDER BY job_class_name",
-}
-
-SYSTEM_OWNERS = {
-    "SYS", "SYSTEM", "OUTLN", "DBSNMP", "SYSMAN", "WMSYS", "XDB", "CTXSYS",
-    "MDSYS", "ORDSYS", "ORDDATA", "OLAPSYS", "APPQOSSYS", "GSMADMIN_INTERNAL",
-    "ANONYMOUS", "APEX_PUBLIC_USER", "FLOWS_FILES", "DIP", "ORACLE_OCM",
 }
 
 OBJECT_LIST_QUERIES = {
@@ -377,16 +368,8 @@ class DatabaseManager:
         try:
             if oracle_type in SPECIAL_QUERIES:
                 cursor.execute(SPECIAL_QUERIES[oracle_type])
-            elif oracle_type in {
-                "FUNCTION", "PROCEDURE", "PACKAGE", "PACKAGE BODY", "TYPE",
-                "TYPE BODY", "TRIGGER", "JAVA SOURCE", "JAVA CLASS", "TABLE",
-                "INDEX", "VIEW", "MATERIALIZED VIEW", "SEQUENCE", "SYNONYM",
-                "LIBRARY", "CLUSTER",
-            }:
-                rows = self._get_objects_from_catalog(cursor, "dba_objects", oracle_type)
-                if rows is None:
-                    rows = self._get_objects_from_catalog(cursor, "all_objects", oracle_type)
-                return rows or []
+            elif oracle_type in OBJECT_LIST_QUERIES:
+                cursor.execute(OBJECT_LIST_QUERIES[oracle_type])
             else:
                 cursor.execute(
                     "SELECT object_name FROM user_objects "
@@ -398,23 +381,6 @@ class DatabaseManager:
             return []
         finally:
             cursor.close()
-
-    def _get_objects_from_catalog(self, cursor, view_name, oracle_type):
-        owner_params = list(SYSTEM_OWNERS)
-        placeholders = ",".join(f":{i + 2}" for i in range(len(owner_params)))
-        try:
-            cursor.execute(
-                "SELECT CASE WHEN owner = USER THEN object_name "
-                "            ELSE owner || '.' || object_name END AS display_name "
-                f"FROM {view_name} "
-                "WHERE object_type = :1 "
-                f"AND owner NOT IN ({placeholders}) "
-                "ORDER BY CASE WHEN owner = USER THEN 0 ELSE 1 END, owner, object_name",
-                [oracle_type] + owner_params,
-            )
-            return [row[0] for row in cursor.fetchall()]
-        except Exception:
-            return None
 
     def _set_transform_params(self, cursor):
         for param, val in [
@@ -707,6 +673,14 @@ class DatabaseManager:
             cursor.close()
 
 
+def own_object_name(user, name, oracle_type=""):
+    """Discard legacy selections from another schema; retain dotted DB link names."""
+    if "." not in name or oracle_type == "DATABASE LINK":
+        return name
+    owner, base_name = name.split(".", 1)
+    return base_name if owner.upper() == user.strip().upper() else None
+
+
 def validate_table_exports(config, table_exports):
     if not table_exports:
         return []
@@ -718,6 +692,7 @@ def validate_table_exports(config, table_exports):
     try:
         for item in table_exports:
             table_name = (item.get("table") or "").strip().upper()
+            table_name = own_object_name(config["user"], table_name)
             if not table_name:
                 continue
             ok, where_clause, err = db.validate_table_where(table_name, item.get("where", ""))
@@ -763,10 +738,15 @@ def export_ddl_task(config, export_dir, selected_objects, progress_callback, log
             for oracle_type, names in selected_objects.items():
                 if names is None:
                     names = _apply_filter(db.get_objects_by_type(oracle_type))
+                else:
+                    names = [own_object_name(config["user"], name, oracle_type) for name in names]
+                    names = [name for name in names if name]
                 if names:
                     target_list.append((oracle_type, names))
 
-        table_exports = table_exports or []
+        table_exports = [dict(item, table=own_object_name(config["user"], item.get("table", "")))
+                         for item in (table_exports or [])
+                         if own_object_name(config["user"], item.get("table", ""))]
         total = sum(len(names) for _, names in target_list) + len(table_exports)
         if total == 0:
             return "没有发现待导出的对象或表数据"
