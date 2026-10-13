@@ -98,18 +98,20 @@ class GitBackupTest(unittest.TestCase):
         self.assertNotIn("example-secret", json.dumps(self.options))
 
     def test_preserve_other_folders_dates_and_create_branch(self):
-        self.seed({"README.md": b"keep", "backups/学校A/2000-01-01/TABLE/OLD.sql": b"old"})
-        upload_backup(str(self.backup), self.options, Mock(), date_folder="2026-10-13")
+        self.seed({"README.md": b"keep", "backups/学校A/2000-01-01/TABLE/OLD.sql": b"old",
+                   "backups/学校A/PROCEDURE/STALE.sql": b"stale"})
+        upload_backup(str(self.backup), self.options, Mock())
         files = self.remote_files()
         self.assertEqual(files["README.md"], b"keep")
         self.assertEqual(files["backups/学校A/2000-01-01/TABLE/OLD.sql"], b"old")
+        self.assertNotIn("backups/学校A/PROCEDURE/STALE.sql", files)
         old_head = self.repo.refs[b"refs/heads/main"]
         (self.backup / "TABLE" / "旧表.sql").unlink()
         (self.backup / "TABLE" / "新表.sql").write_text("select 2;", encoding="utf-8")
-        upload_backup(str(self.backup), self.options, Mock(), date_folder="2026-10-13")
+        upload_backup(str(self.backup), self.options, Mock())
         files = self.remote_files()
-        self.assertNotIn("backups/学校A/2026-10-13/TABLE/旧表.sql", files)
-        self.assertIn("backups/学校A/2026-10-13/TABLE/新表.sql", files)
+        self.assertNotIn("backups/学校A/TABLE/旧表.sql", files)
+        self.assertIn("backups/学校A/TABLE/新表.sql", files)
         self.assertEqual(self.repo[self.repo.refs[b"refs/heads/main"]].parents, [old_head])
         self.options["branch"] = "backups/test"
         upload_backup(str(self.backup), self.options, Mock())
@@ -175,12 +177,16 @@ class GitBackupTest(unittest.TestCase):
                                                Mock(), Mock(), daily_subdir=True, git_config=self.options)
             self.assertIn("上传成功", message)
             date = datetime.date.today().isoformat()
-            self.assertIn(f"backups/学校A/{date}/TABLE/T.sql", self.remote_files())
+            self.assertIn("backups/学校A/TABLE/T.sql", self.remote_files())
+            self.assertNotIn(f"backups/学校A/{date}/TABLE/T.sql", self.remote_files())
+            self.assertEqual((self.backup / "TABLE" / "T.sql").read_bytes(),
+                             (self.backup / date / "TABLE" / "T.sql").read_bytes())
             wrong = dict(self.options, password_protected=protect_secret("bad-password"))
             with self.assertRaisesRegex(Exception, "本地备份已完成"):
                 db_logic.export_ddl_task(config, str(self.backup), {"TABLE": ["T"]},
                                          Mock(), Mock(), daily_subdir=True, git_config=wrong)
             self.assertTrue((self.backup / date / "TABLE" / "T.sql").exists())
+            self.assertTrue((self.backup / "TABLE" / "T.sql").exists())
 
 
 if __name__ == "__main__":

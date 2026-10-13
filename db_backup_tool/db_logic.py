@@ -712,6 +712,7 @@ def export_ddl_task(config, export_dir, selected_objects, progress_callback, log
     selected_objects: {oracle_type: list_of_names or None}
     table_exports: [{"table": "TABLE_NAME", "where": "WHERE ..."}]
     """
+    backup_root = os.path.abspath(export_dir)
     date_folder = datetime.date.today().isoformat() if daily_subdir else ""
     if date_folder:
         export_dir = os.path.join(export_dir, date_folder)
@@ -803,10 +804,26 @@ def export_ddl_task(config, export_dir, selected_objects, progress_callback, log
         if git_config and git_config.get("enabled"):
             if should_stop and should_stop():
                 return "本地备份已完成；已取消 Git 上传。"
-            from git_backup import upload_backup
+            from git_backup import upload_backup, collect_backup_files
             try:
-                git_message = upload_backup(export_dir, git_config, log_callback,
-                                            files=exported_files, date_folder=date_folder,
+                if daily_subdir:
+                    log_callback(f"正在同步 Git 备份到根目录：{backup_root}")
+                    snapshot_files = collect_backup_files(export_dir)
+                    allowed = {kind.replace(" ", "_") for _, kind in OBJECT_CATEGORIES} | {"DATA"}
+                    for folder in allowed:
+                        target = os.path.abspath(os.path.join(backup_root, folder))
+                        if os.path.commonpath([backup_root, target]) != backup_root or os.path.islink(target):
+                            raise ValueError("Git 本地备份目录不合法")
+                        if os.path.isdir(target):
+                            for old_file in glob.glob(os.path.join(target, "*.sql")):
+                                os.remove(old_file)
+                    for name in snapshot_files:
+                        target = os.path.join(backup_root, name)
+                        os.makedirs(os.path.dirname(target), exist_ok=True)
+                        shutil.copy2(os.path.join(export_dir, name), target)
+                exported_files = collect_backup_files(backup_root)
+                git_message = upload_backup(backup_root, git_config, log_callback,
+                                            files=exported_files,
                                             should_stop=should_stop)
             except Exception as error:
                 raise Exception(f"本地备份已完成；{error}") from None

@@ -116,6 +116,71 @@ class BackupOptionsTest(unittest.TestCase):
                 self.assertTrue(os.path.isfile(sentinel))
                 db.close.assert_called_once()
 
+    def test_daily_local_copy_and_git_root_copy_are_independent(self):
+        for daily in (False, True):
+            for git_enabled in (False, True):
+                with self.subTest(daily=daily, git=git_enabled), tempfile.TemporaryDirectory() as folder:
+                    db = Mock()
+                    db.connect.return_value = (True, "OK")
+                    db.get_ddl.return_value = "create table T (id number);"
+                    def data_sql(table, where, path, **kwargs):
+                        with open(path, "w") as stream:
+                            stream.write("insert into T values (1);")
+                        return 1
+                    db.export_table_data_sql.side_effect = data_sql
+                    with patch.object(db_logic, "DatabaseManager", return_value=db), patch("git_backup.upload_backup", return_value="Git OK") as upload:
+                        db_logic.export_ddl_task(
+                            {"user": "test", "password": "test", "conn_str": "test"},
+                            folder, {"TABLE": ["T"]}, Mock(), Mock(),
+                            daily_subdir=daily, git_config={"enabled": git_enabled},
+                            table_exports=[{"table": "T"}],
+                        )
+                    dated = os.path.join(folder, datetime.date.today().isoformat())
+                    for kind in ("TABLE", "DATA"):
+                        root_file = os.path.join(folder, kind, "T.sql")
+                        dated_file = os.path.join(dated, kind, "T.sql")
+                        self.assertEqual(os.path.isfile(root_file), git_enabled or not daily)
+                        self.assertEqual(os.path.isfile(dated_file), daily)
+                        if daily and git_enabled:
+                            with open(root_file, "rb") as root_stream, open(dated_file, "rb") as dated_stream:
+                                self.assertEqual(root_stream.read(), dated_stream.read())
+                    if git_enabled:
+                        self.assertEqual(upload.call_args.args[0], folder)
+                        self.assertNotIn("date_folder", upload.call_args.kwargs)
+                    else:
+                        upload.assert_not_called()
+
+    def test_manual_git_upload_always_uses_root(self):
+        with patch.object(main, "upload_backup", return_value="OK") as upload:
+            worker = main.GitUploadWorker("root", {"enabled": True})
+            worker.run()
+            self.assertEqual(upload.call_args.args[0], "root")
+            self.assertNotIn("date_folder", upload.call_args.kwargs)
+
+    def test_git_root_sql_snapshot_matches_date_without_stale_files(self):
+        from pathlib import Path
+        from git_backup import collect_backup_files
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "PROCEDURE").mkdir()
+            (root / "PROCEDURE" / "OLD.sql").write_text("old")
+            (root / "PROCEDURE" / "notes.txt").write_text("keep")
+            old_date = root / "2000-01-01" / "TABLE"
+            old_date.mkdir(parents=True)
+            (old_date / "OLD.sql").write_text("archive")
+            db = Mock()
+            db.connect.return_value = (True, "OK")
+            db.get_ddl.return_value = "create table T (id number);"
+            with patch.object(db_logic, "DatabaseManager", return_value=db), patch("git_backup.upload_backup", return_value="OK"):
+                db_logic.export_ddl_task({"user": "test", "password": "test", "conn_str": "test"},
+                                         folder, {"TABLE": ["T"]}, Mock(), Mock(),
+                                         daily_subdir=True, git_config={"enabled": True})
+            date = root / datetime.date.today().isoformat()
+            self.assertEqual(collect_backup_files(root), collect_backup_files(date))
+            self.assertFalse((root / "PROCEDURE" / "OLD.sql").exists())
+            self.assertTrue((root / "PROCEDURE" / "notes.txt").exists())
+            self.assertTrue((old_date / "OLD.sql").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

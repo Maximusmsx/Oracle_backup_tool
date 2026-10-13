@@ -1,7 +1,6 @@
 ﻿import sys
 import json
 import os
-import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QFileDialog, QTreeWidget,
@@ -109,17 +108,15 @@ class GitUploadWorker(QThread):
     log = pyqtSignal(str)
     finished = pyqtSignal(bool, str)
 
-    def __init__(self, export_dir, options, daily_subdir):
+    def __init__(self, export_dir, options):
         super().__init__()
         self.export_dir = export_dir
         self.options = options
-        self.date_folder = datetime.date.today().isoformat() if daily_subdir else ""
 
     def run(self):
         try:
-            directory = os.path.join(self.export_dir, self.date_folder) if self.date_folder else self.export_dir
-            message = upload_backup(directory, self.options, self.log.emit,
-                                    date_folder=self.date_folder, should_stop=self.isInterruptionRequested)
+            message = upload_backup(self.export_dir, self.options, self.log.emit,
+                                    should_stop=self.isInterruptionRequested)
             self.finished.emit(True, message)
         except Exception as error:
             self.finished.emit(False, str(error))
@@ -209,10 +206,11 @@ class MainWindow(QMainWindow):
         h2.addWidget(self.dir_path)
         h2.addWidget(self.btn_browse)
         layout.addLayout(h2)
-        self.daily_subdir = QCheckBox("按日建目录（yyyy-mm-dd）")
+        self.daily_subdir = QCheckBox("按日建目录（仅本地备份，yyyy-mm-dd）")
         layout.addWidget(self.daily_subdir)
 
         self.git_group = QCheckBox("备份完成后上传 Git（HTTP／HTTPS，无需安装 Git）")
+        self.git_group.setToolTip("始终使用备份根目录的 SQL；与按日建目录无关。两项同时启用时保留两份相同的 SQL。")
         self.git_group.setChecked(False)
         layout.addWidget(self.git_group)
         self.git_panel = QGroupBox()
@@ -784,7 +782,7 @@ class MainWindow(QMainWindow):
         self.btn_git_upload.setEnabled(False)
         self.btn_export.setEnabled(False)
         self.btn_all_export.setEnabled(False)
-        self.git_worker = GitUploadWorker(self.dir_path.text().strip(), options, self.daily_subdir.isChecked())
+        self.git_worker = GitUploadWorker(self.dir_path.text().strip(), options)
         self.git_worker.log.connect(self.log_output.append)
         self.git_worker.finished.connect(self.on_git_upload_finished)
         self.git_worker.start()

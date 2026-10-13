@@ -96,7 +96,7 @@ def collect_backup_files(export_dir):
     return files
 
 
-def upload_backup(export_dir, options, log_callback, files=None, date_folder="", should_stop=None):
+def upload_backup(export_dir, options, log_callback, files=None, should_stop=None):
     validate_git_config(options)
     if should_stop and should_stop():
         return "Git：已取消上传，本地备份已保留"
@@ -105,9 +105,6 @@ def upload_backup(export_dir, options, log_callback, files=None, date_folder="",
         raise GitBackupError("没有可上传的备份 SQL 文件")
     root = Path(export_dir).resolve()
     prefix = options["folder"].strip() + "/"
-    if date_folder:
-        datetime.date.fromisoformat(date_folder)
-        prefix += date_folder + "/"
     # Resolve and validate all files before opening a network connection.
     contents = []
     for name in files:
@@ -139,7 +136,10 @@ def upload_backup(export_dir, options, log_callback, files=None, date_folder="",
                 old_tree = repo[parent].tree if parent else None
                 entries = {entry.path: (entry.sha, entry.mode)
                            for entry in iter_tree_contents(repo.object_store, old_tree)}
-                folders = {path.rsplit(b"/", 1)[0] + b"/" for path, _ in contents}
+                from db_logic import OBJECT_CATEGORIES
+                folders = {(prefix + kind.replace(" ", "_") + "/").encode("utf-8")
+                           for _, kind in OBJECT_CATEGORIES}
+                folders.add((prefix + "DATA/").encode("utf-8"))
                 entries = {path: value for path, value in entries.items()
                            if not (path.lower().endswith(b".sql") and
                                    any(path.startswith(folder) for folder in folders))}
