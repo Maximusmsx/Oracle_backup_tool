@@ -130,6 +130,8 @@ class MainWindow(QMainWindow):
         self.profiles = {}       # {name: {user, password, conn_str, export_dir, selected_objects}}
         self.current_profile = ""
         self.db_manager = None
+        self._connection_identity = None
+        self._loaded_table_identity = None
         self._loading_profile = False
         self.init_ui()
         self.load_config()
@@ -301,6 +303,14 @@ class MainWindow(QMainWindow):
         self.table_data_grid.itemChanged.connect(self.on_table_data_changed)
         data_layout.addWidget(self.table_data_grid)
         self.tabs.addTab(data_tab, "表数据")
+        table_status_row = QHBoxLayout()
+        self.lbl_table_count = QLabel("表清单尚未加载")
+        table_status_row.addWidget(self.lbl_table_count)
+        table_status_row.addStretch()
+        self.btn_refresh_tables = QPushButton("刷新表清单")
+        self.btn_refresh_tables.clicked.connect(self._load_table_data_from_db)
+        table_status_row.addWidget(self.btn_refresh_tables)
+        data_layout.addLayout(table_status_row)
 
         layout.addWidget(self.tabs)
         # 按钮行
@@ -329,6 +339,7 @@ class MainWindow(QMainWindow):
         self.log_output.setReadOnly(True)
         self.log_output.setMaximumHeight(110)
         layout.addWidget(self.log_output)
+        self.tabs.currentChanged.connect(self.on_tab_changed)
 
     # ── 树构建 ──────────────────────────────────────
     def _build_tree(self, saved_selections=None):
@@ -404,6 +415,8 @@ class MainWindow(QMainWindow):
         if name not in self.profiles:
             return
         self._loading_profile = True
+        self._connection_identity = None
+        self._loaded_table_identity = None
         if self.db_manager:
             self.db_manager.close()
             self.db_manager = None
@@ -433,6 +446,7 @@ class MainWindow(QMainWindow):
             self.git_password.clear()
             self.log_output.append(str(error))
         self._build_tree(saved_selections=p.get("selected_objects", {}))
+        self.data_filter_input.clear()
         self._build_table_data_grid(saved_exports=p.get("table_exports", []))
         self.filter_input.setText(p.get("filter_text", ""))
         self.apply_filter()
@@ -442,8 +456,12 @@ class MainWindow(QMainWindow):
         else:
             self.combo_profile.setEditText(name)
         self._loading_profile = False
+        if self.tabs.currentIndex() == 1:
+            self.apply_data_filter()
 
     def _build_table_data_grid(self, table_names=None, saved_exports=None):
+        if table_names is None:
+            self._loaded_table_identity = None
         saved_exports = saved_exports or []
         saved_map = {
             own_object_name(self.u_name.text(), (item.get("table") or "").strip().upper()): item.get("where", "")
@@ -451,9 +469,10 @@ class MainWindow(QMainWindow):
             if own_object_name(self.u_name.text(), (item.get("table") or "").strip().upper())
         }
         names = [n.upper() for n in (table_names or [])]
-        for saved_name in saved_map:
-            if saved_name not in names:
-                names.append(saved_name)
+        if table_names is None:
+            for saved_name in saved_map:
+                if saved_name not in names:
+                    names.append(saved_name)
         names = sorted(set(names))
 
         self.table_data_grid.blockSignals(True)
@@ -472,13 +491,41 @@ class MainWindow(QMainWindow):
             self.table_data_grid.setItem(row, 0, table_item)
             self.table_data_grid.setItem(row, 1, where_item)
         self.table_data_grid.blockSignals(False)
-        self.apply_data_filter()
+        self._filter_loaded_tables()
 
     def _load_table_data_from_db(self):
+        return self._ensure_table_data_loaded(force=True)
+
+    def _ensure_table_data_loaded(self, force=False):
+        if self._loading_profile:
+            return False
+        identity = (self.u_name.text(), self.u_pwd.text(), self.conn_str.text())
+        if not all(identity):
+            self.lbl_table_count.setText("请填写连接配置后加载表清单")
+            return False
+        if self._connection_identity != identity or not self.db_manager or not self.db_manager.is_connected():
+            ok, message = self._try_connect()
+            if not ok:
+                self.lbl_table_count.setText("表清单加载失败：连接失败")
+                self.log_output.append(f"表清单加载失败：{message}")
+                return False
+        if not force and self._loaded_table_identity == identity:
+            return True
         saved = self._collect_table_exports(validate_where=False)
-        if self.db_manager and self.db_manager.is_connected():
+        try:
             names = self.db_manager.get_objects_by_type("TABLE")
+            self._loaded_table_identity = identity
             self._build_table_data_grid(names, saved)
+            return True
+        except Exception as error:
+            self._loaded_table_identity = None
+            self.lbl_table_count.setText("表清单加载失败，请重试刷新")
+            self.log_output.append(f"表清单加载失败：{error}")
+            return False
+
+    def on_tab_changed(self, index):
+        if index == 1:
+            self.apply_data_filter()
 
     def _collect_table_exports(self, validate_where=False):
         result = []
@@ -514,11 +561,23 @@ class MainWindow(QMainWindow):
         self.table_data_grid.blockSignals(False)
 
     def apply_data_filter(self):
+        if not self._ensure_table_data_loaded():
+            return
+        self._filter_loaded_tables()
+
+    def _filter_loaded_tables(self):
         text = self.data_filter_input.text().strip().lower()
+        visible = 0
         for row in range(self.table_data_grid.rowCount()):
             table_item = self.table_data_grid.item(row, 0)
             name = table_item.text().lower() if table_item else ""
             self.table_data_grid.setRowHidden(row, bool(text) and text not in name)
+            visible += not self.table_data_grid.isRowHidden(row)
+        if self._loaded_table_identity is None:
+            self.lbl_table_count.setText("表清单尚未加载；打开表数据页或点击刷新自动加载")
+        else:
+            message = f"共 {self.table_data_grid.rowCount()} 张表，显示 {visible} 张"
+            self.lbl_table_count.setText(message + ("（无匹配表名）" if text and not visible else ""))
 
     def on_table_data_changed(self, item):
         pass
@@ -623,6 +682,8 @@ class MainWindow(QMainWindow):
     def _try_connect(self):
         if not self.u_name.text() or not self.u_pwd.text() or not self.conn_str.text():
             return False, "连接配置不完整"
+        self._connection_identity = None
+        self._loaded_table_identity = None
         if self.db_manager:
             self.db_manager.close()
         self.db_manager = DatabaseManager(
@@ -630,6 +691,7 @@ class MainWindow(QMainWindow):
         )
         ok, msg = self.db_manager.connect()
         if ok:
+            self._connection_identity = (self.u_name.text(), self.u_pwd.text(), self.conn_str.text())
             mode = "Thick" if self.db_manager.use_thick else "Thin"
             self.lbl_status.setText(
                 f"● 已连接 ({mode}): {self.u_name.text()}@{self.conn_str.text()}"
@@ -864,6 +926,9 @@ class MainWindow(QMainWindow):
             return
         if not self.dir_path.text():
             QMessageBox.critical(self, "错误", "备份目录不能为空")
+            return
+
+        if not self._ensure_table_data_loaded():
             return
 
         selected = self._collect_export_targets()
