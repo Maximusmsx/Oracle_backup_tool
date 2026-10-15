@@ -276,6 +276,18 @@ class MainWindow(QMainWindow):
         h3 = QHBoxLayout()
         h3.addWidget(QLabel("数据库对象勾选（展开类型后按需加载；不勾选默认导出全部）"))
         h3.addStretch()
+        self.chk_only_checked = QCheckBox("仅显示已勾选对象")
+        self.chk_only_checked.setToolTip(
+            "只显示已勾选的对象，方便在对象较多时定位。\n"
+            "只影响显示，不改变导出内容；勾选类型行仍表示选中该类型全部对象。"
+        )
+        self.chk_only_checked.toggled.connect(self.apply_filter)
+        h3.addWidget(self.chk_only_checked)
+        self.lbl_checked_count = QLabel("已勾选 0 个")
+        self.lbl_checked_count.setToolTip(
+            "统计已展开并加载的对象；整类勾选但尚未展开的类型不计入具体个数。"
+        )
+        h3.addWidget(self.lbl_checked_count)
         h3.addWidget(QLabel("名称筛选"))
         self.filter_input = QLineEdit()
         self.filter_input.setFixedWidth(150)
@@ -692,16 +704,35 @@ class MainWindow(QMainWindow):
     # ── 筛选 ────────────────────────────────────────
     def apply_filter(self):
         text = self.filter_input.text().strip().lower()
+        only_checked = self.chk_only_checked.isChecked()
+        checked_count = 0
+        whole_types = 0
         root = self.tree.invisibleRootItem()
         for i in range(root.childCount()):
             type_item = root.child(i)
             type_item.setHidden(False)          # 类型行永不隐藏
+            loaded = 0
             for j in range(type_item.childCount()):
                 child = type_item.child(j)
                 if child.data(0, Qt.ItemDataRole.UserRole) == PLACEHOLDER_DATA:
                     child.setHidden(False)
                     continue
-                child.setHidden(bool(text) and text not in child.text(0).lower())
+                loaded += 1
+                is_checked = child.checkState(0) == Qt.CheckState.Checked
+                if is_checked:
+                    checked_count += 1
+                # 未勾选对象被隐藏后，仍可通过类型行重新勾选整类
+                mismatch = bool(text) and text not in child.text(0).lower()
+                child.setHidden(mismatch or (only_checked and not is_checked))
+            if not loaded and type_item.checkState(0) == Qt.CheckState.Checked:
+                whole_types += 1
+        self._update_checked_count(checked_count, whole_types)
+
+    def _update_checked_count(self, checked_count, whole_types):
+        text = "已勾选 %d 个" % checked_count
+        if whole_types:
+            text += "（另有 %d 类整类勾选）" % whole_types
+        self.lbl_checked_count.setText(text)
 
     # ── 数据库连接 ───────────────────────────────────
     def _try_connect(self):
@@ -837,6 +868,9 @@ class MainWindow(QMainWindow):
                             parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
         finally:
             self.tree.blockSignals(False)
+
+        # 勾选变化会改变"仅显示已勾选对象"的可见范围和已勾选计数
+        self.apply_filter()
 
         # 勾选变化时自动同步到当前配置（selected_objects）
         if self.current_profile:
