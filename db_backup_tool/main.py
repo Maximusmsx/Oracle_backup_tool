@@ -8,8 +8,9 @@ from PyQt6.QtWidgets import (
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QGroupBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from db_logic import DatabaseManager, export_ddl_task, OBJECT_CATEGORIES, validate_table_exports, own_object_name
+from db_logic import DatabaseManager, export_ddl_task, OBJECT_CATEGORIES, validate_table_exports, own_object_name, merge_package_selections
 from git_backup import protect_secret, reveal_secret, validate_git_config, upload_backup
+from backup_compare import generate_comparison
 
 PLACEHOLDER_DATA = "__placeholder__"
 
@@ -118,6 +119,24 @@ class GitUploadWorker(QThread):
             message = upload_backup(self.export_dir, self.options, self.log.emit,
                                     should_stop=self.isInterruptionRequested)
             self.finished.emit(True, message)
+        except Exception as error:
+            self.finished.emit(False, str(error))
+
+
+class CompareWorker(QThread):
+    log = pyqtSignal(str)
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, export_dir, daily_subdir, git_options):
+        super().__init__()
+        self.export_dir = export_dir
+        self.daily_subdir = daily_subdir
+        self.git_options = git_options
+
+    def run(self):
+        try:
+            path = generate_comparison(self.export_dir, self.daily_subdir, self.git_options, self.log.emit)
+            self.finished.emit(True, path)
         except Exception as error:
             self.finished.emit(False, str(error))
 
@@ -316,6 +335,10 @@ class MainWindow(QMainWindow):
         # 按钮行
         btn_row = QHBoxLayout()
         btn_row.addStretch()
+        self.btn_compare = QPushButton("生成修改说明")
+        self.btn_compare.setToolTip("按日：最新日期对比前一日期；仅 Git：当前备份对比远端上一个版本。")
+        self.btn_compare.clicked.connect(self.start_comparison)
+        btn_row.addWidget(self.btn_compare)
         self.btn_export = QPushButton("导出当前配置")
         self.btn_export.setStyleSheet(
             "background-color: #4CAF50; color: white; font-weight: bold; "
@@ -423,6 +446,8 @@ class MainWindow(QMainWindow):
         self.lbl_status.setText("● 未连接")
         self.lbl_status.setStyleSheet("color: gray; font-weight: bold;")
         p = self.profiles[name]
+        if "PACKAGE BODY" in p.get("selected_objects", {}):
+            p["selected_objects"] = merge_package_selections(p["selected_objects"])
         for kind, names in p.get("selected_objects", {}).items():
             if isinstance(names, list):
                 p["selected_objects"][kind] = [own_object_name(p.get("user", ""), item, kind)
@@ -834,6 +859,9 @@ class MainWindow(QMainWindow):
         return options
 
     def start_git_upload(self):
+        if getattr(self, "compare_worker", None) and self.compare_worker.isRunning():
+            QMessageBox.warning(self, "对比进行中", "请等待对比结束后再上传。")
+            return
         try:
             options = self._collect_git_config()
             if not options["enabled"] or not self.dir_path.text().strip():
@@ -863,6 +891,43 @@ class MainWindow(QMainWindow):
         d = QFileDialog.getExistingDirectory(self, "选择备份目录")
         if d:
             self.dir_path.setText(d)
+
+    def start_comparison(self):
+        if any(getattr(self, name, None) and getattr(self, name).isRunning()
+               for name in ("worker", "all_worker", "git_worker", "compare_worker")):
+            QMessageBox.warning(self, "任务进行中", "请等待当前任务结束后再生成修改说明。")
+            return
+        daily = self.daily_subdir.isChecked()
+        if not daily and not self.git_group.isChecked():
+            QMessageBox.warning(self, "无法对比", "无法对比：请勾选“按日建目录”或“备份完成后上传 Git”。")
+            return
+        if not self.dir_path.text().strip():
+            QMessageBox.warning(self, "无法对比", "请先选择备份目录。")
+            return
+        try:
+            options = {} if daily else self._collect_git_config()
+        except Exception as error:
+            QMessageBox.critical(self, "Git 对比配置错误", str(error))
+            return
+        self.btn_compare.setEnabled(False)
+        self.btn_export.setEnabled(False)
+        self.btn_all_export.setEnabled(False)
+        self.btn_git_upload.setEnabled(False)
+        self.compare_worker = CompareWorker(self.dir_path.text().strip(), daily, options)
+        self.compare_worker.log.connect(self.log_output.append)
+        self.compare_worker.finished.connect(self.on_comparison_finished)
+        self.compare_worker.start()
+
+    def on_comparison_finished(self, success, message):
+        self.btn_compare.setEnabled(True)
+        self.btn_export.setEnabled(True)
+        self.btn_all_export.setEnabled(True)
+        self.btn_git_upload.setEnabled(True)
+        if success:
+            QMessageBox.information(self, "修改说明已生成", f"修改说明已保存到：\n{message}")
+        else:
+            self.log_output.append(message)
+            QMessageBox.warning(self, "无法对比", message)
 
     def _collect_export_targets(self):
         """收集导出目标，尊重筛选隐藏状态：被隐藏的对象不导出。"""
@@ -921,6 +986,9 @@ class MainWindow(QMainWindow):
         self.log_output.append("正在停止，请稍候...")
 
     def start_export(self):
+        if getattr(self, "compare_worker", None) and self.compare_worker.isRunning():
+            QMessageBox.warning(self, "对比进行中", "请等待对比结束后再导出。")
+            return
         if not self.u_name.text() or not self.u_pwd.text() or not self.conn_str.text():
             QMessageBox.critical(self, "错误", "数据库连接配置不能为空")
             return
@@ -993,6 +1061,9 @@ class MainWindow(QMainWindow):
         self.log_output.append("正在停止，请稍候...")
 
     def start_all_export(self):
+        if getattr(self, "compare_worker", None) and self.compare_worker.isRunning():
+            QMessageBox.warning(self, "对比进行中", "请等待对比结束后再导出。")
+            return
         if not self.profiles:
             QMessageBox.warning(self, "提示", "没有任何已保存的配置")
             return
@@ -1053,8 +1124,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if any(getattr(self, name, None) and getattr(self, name).isRunning()
-               for name in ("worker", "all_worker", "git_worker")):
-            QMessageBox.warning(self, "任务进行中", "请等待备份或上传结束后再关闭程序。")
+               for name in ("worker", "all_worker", "git_worker", "compare_worker")):
+            QMessageBox.warning(self, "任务进行中", "请等待备份、上传或对比结束后再关闭程序。")
             event.ignore()
             return
         if self.db_manager:

@@ -123,7 +123,6 @@ OBJECT_CATEGORIES = [
     ("Functions",          "FUNCTION"),
     ("Procedures",         "PROCEDURE"),
     ("Packages",           "PACKAGE"),
-    ("Package bodies",     "PACKAGE BODY"),
     ("Types",              "TYPE"),
     ("Type bodies",        "TYPE BODY"),
     ("Triggers",           "TRIGGER"),
@@ -163,6 +162,25 @@ META_TYPE_MAP = {
     "WINDOW GROUP":     "WINDOW_GROUP",
     "JOB CLASS":        "JOB_CLASS",
 }
+
+
+def merge_package_selections(selections):
+    """Keep legacy body selections as combined PACKAGE exports."""
+    merged = dict(selections or {})
+    if "PACKAGE BODY" not in merged:
+        return merged
+    body = merged.pop("PACKAGE BODY")
+    if "PACKAGE" not in merged:
+        merged["PACKAGE"] = body
+    else:
+        package = merged["PACKAGE"]
+        if package is None or body is None:
+            merged["PACKAGE"] = None
+        elif package == "__ALL__" or body == "__ALL__":
+            merged["PACKAGE"] = "__ALL__"
+        else:
+            merged["PACKAGE"] = list(dict.fromkeys(package + body))
+    return merged
 
 # Scheduler/special types that are NOT in user_objects, need their own query
 SPECIAL_QUERIES = {
@@ -712,6 +730,7 @@ def export_ddl_task(config, export_dir, selected_objects, progress_callback, log
     selected_objects: {oracle_type: list_of_names or None}
     table_exports: [{"table": "TABLE_NAME", "where": "WHERE ..."}]
     """
+    selected_objects = merge_package_selections(selected_objects)
     backup_root = os.path.abspath(export_dir)
     date_folder = datetime.date.today().isoformat() if daily_subdir else ""
     if date_folder:
@@ -742,6 +761,8 @@ def export_ddl_task(config, export_dir, selected_objects, progress_callback, log
                 else:
                     names = [own_object_name(config["user"], name, oracle_type) for name in names]
                     names = [name for name in names if name]
+                if oracle_type == "PACKAGE":
+                    names = list(dict.fromkeys(names))
                 if names:
                     target_list.append((oracle_type, names))
 
