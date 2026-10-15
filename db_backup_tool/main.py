@@ -267,7 +267,18 @@ class MainWindow(QMainWindow):
         git_layout.addLayout(git_auth_row)
         layout.addWidget(self.git_panel)
 
-        layout.addWidget(QLabel("3. 导出对象选择"))
+        section_row = QHBoxLayout()
+        section_row.setSpacing(6)
+        section_row.addWidget(QLabel("3. 导出对象选择"))
+        self.chk_only_checked = QCheckBox("仅显示已勾选对象")
+        self.chk_only_checked.setToolTip(
+            "只显示已勾选的对象，方便在对象较多时定位；DDL 与表数据两页同时生效。\n"
+            "只影响显示，不改变导出内容；勾选类型行仍表示选中该类型全部对象。"
+        )
+        self.chk_only_checked.toggled.connect(self.apply_checked_only)
+        section_row.addWidget(self.chk_only_checked)
+        section_row.addStretch()
+        layout.addLayout(section_row)
         self.tabs = QTabWidget()
 
         ddl_tab = QWidget()
@@ -276,13 +287,6 @@ class MainWindow(QMainWindow):
         h3 = QHBoxLayout()
         h3.addWidget(QLabel("数据库对象勾选（展开类型后按需加载；不勾选默认导出全部）"))
         h3.addStretch()
-        self.chk_only_checked = QCheckBox("仅显示已勾选对象")
-        self.chk_only_checked.setToolTip(
-            "只显示已勾选的对象，方便在对象较多时定位。\n"
-            "只影响显示，不改变导出内容；勾选类型行仍表示选中该类型全部对象。"
-        )
-        self.chk_only_checked.toggled.connect(self.apply_filter)
-        h3.addWidget(self.chk_only_checked)
         self.lbl_checked_count = QLabel("已勾选 0 个")
         self.lbl_checked_count.setToolTip(
             "统计已展开并加载的对象；整类勾选但尚未展开的类型不计入具体个数。"
@@ -604,20 +608,30 @@ class MainWindow(QMainWindow):
 
     def _filter_loaded_tables(self):
         text = self.data_filter_input.text().strip().lower()
+        only_checked = self.chk_only_checked.isChecked()
         visible = 0
         for row in range(self.table_data_grid.rowCount()):
             table_item = self.table_data_grid.item(row, 0)
             name = table_item.text().lower() if table_item else ""
-            self.table_data_grid.setRowHidden(row, bool(text) and text not in name)
+            checked = bool(table_item) and table_item.checkState() == Qt.CheckState.Checked
+            mismatch = bool(text) and text not in name
+            # 与名称筛选同为"与"关系：隐藏的行不参与导出（_collect_table_exports 本就不看隐藏状态）
+            self.table_data_grid.setRowHidden(row, mismatch or (only_checked and not checked))
             visible += not self.table_data_grid.isRowHidden(row)
         if self._loaded_table_identity is None:
             self.lbl_table_count.setText("表清单尚未加载；打开表数据页或点击刷新自动加载")
         else:
             message = f"共 {self.table_data_grid.rowCount()} 张表，显示 {visible} 张"
-            self.lbl_table_count.setText(message + ("（无匹配表名）" if text and not visible else ""))
+            if not visible and only_checked:
+                self.lbl_table_count.setText(message + "（无勾选表）")
+            elif not visible and text:
+                self.lbl_table_count.setText(message + "（无匹配表名）")
+            else:
+                self.lbl_table_count.setText(message)
 
     def on_table_data_changed(self, item):
-        pass
+        if item.column() == 0:
+            self._filter_loaded_tables()
 
     def on_profile_activated(self, index):
         if self._loading_profile:
@@ -727,6 +741,12 @@ class MainWindow(QMainWindow):
             if not loaded and type_item.checkState(0) == Qt.CheckState.Checked:
                 whole_types += 1
         self._update_checked_count(checked_count, whole_types)
+
+    def apply_checked_only(self):
+        """Checkbox covers both tabs; never trigger a database load from the DDL tab."""
+        self.apply_filter()
+        if self.table_data_grid.rowCount():
+            self._filter_loaded_tables()
 
     def _update_checked_count(self, checked_count, whole_types):
         text = "已勾选 %d 个" % checked_count
