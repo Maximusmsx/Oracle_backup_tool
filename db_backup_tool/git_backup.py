@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 import tempfile
 import time
 from urllib.parse import urlsplit
+from urllib.request import getproxies, proxy_bypass
 
 from dulwich.client import get_transport_and_path, HTTPUnauthorized
 from dulwich.config import ConfigDict
@@ -15,11 +16,24 @@ from dulwich.object_store import iter_tree_contents
 from dulwich.objects import Blob, Commit
 from dulwich.refs import check_ref_format
 from dulwich.repo import Repo
-from urllib3 import PoolManager, Timeout
+from urllib3 import PoolManager, ProxyManager, Timeout
 
 
 class GitBackupError(Exception):
     pass
+
+
+def create_git_pool(url):
+    # PoolManager does not read Windows system or environment proxy settings.
+    target = urlsplit(url)
+    proxies = getproxies()
+    proxy = proxies.get(target.scheme) or proxies.get("all")
+    settings = {"timeout": Timeout(connect=15, read=30), "retries": False}
+    if proxy and not proxy_bypass(target.netloc):
+        if "://" not in proxy:
+            proxy = "http://" + proxy
+        return ProxyManager(proxy, **settings)
+    return PoolManager(**settings)
 
 
 def _crypt_secret(value, decrypt=False):
@@ -120,7 +134,7 @@ def upload_backup(export_dir, options, log_callback, files=None, should_stop=Non
         contents.append(((prefix + relative.as_posix()).encode("utf-8"), data))
     ref = ("refs/heads/" + options.get("branch", "main").strip()).encode("utf-8")
     password = reveal_secret(options.get("password_protected", ""))
-    pool = PoolManager(timeout=Timeout(connect=15, read=30), retries=False)
+    pool = create_git_pool(options["url"].strip())
     try:
         with tempfile.TemporaryDirectory(prefix="oracle_git_") as directory:
             with Repo.init_bare(directory) as repo:
@@ -159,7 +173,8 @@ def upload_backup(export_dir, options, log_callback, files=None, should_stop=Non
                 commit.author = commit.committer = b"Oracle Backup Tool <oracle-backup@localhost>"
                 commit.author_time = commit.commit_time = int(time.time())
                 commit.author_timezone = commit.commit_timezone = 0
-                commit.message = ("Oracle backup " + datetime.datetime.now().isoformat(timespec="seconds")).encode()
+                commit.message = (options.get("commit_message", "").strip() or
+                                  "Oracle backup " + datetime.datetime.now().isoformat(timespec="seconds")).encode("utf-8")
                 repo.object_store.add_object(commit)
 
                 def update_refs(remote_refs):

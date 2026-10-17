@@ -9,10 +9,9 @@ from dulwich.client import get_transport_and_path, HTTPUnauthorized
 from dulwich.config import ConfigDict
 from dulwich.object_store import iter_tree_contents
 from dulwich.repo import Repo
-from urllib3 import PoolManager, Timeout
 
 from db_logic import OBJECT_CATEGORIES
-from git_backup import collect_backup_files, reveal_secret, validate_git_config
+from git_backup import collect_backup_files, create_git_pool, reveal_secret, validate_git_config
 
 
 class CompareError(Exception):
@@ -83,7 +82,7 @@ def _git_snapshot(repo, commit_id, prefix):
 def _download_previous(root, options, current, log_callback):
     validate_git_config(options)
     password = reveal_secret(options.get("password_protected", ""))
-    pool = PoolManager(timeout=Timeout(connect=15, read=30), retries=False)
+    pool = create_git_pool(options["url"].strip())
     try:
         with tempfile.TemporaryDirectory(prefix="oracle_compare_repo_") as directory:
             with Repo.init_bare(directory) as repo:

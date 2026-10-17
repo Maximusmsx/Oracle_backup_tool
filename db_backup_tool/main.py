@@ -5,8 +5,9 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QFileDialog, QTreeWidget,
     QTreeWidgetItem, QProgressBar, QMessageBox, QTextEdit, QComboBox,
-    QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QGroupBox
+    QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QGroupBox, QInputDialog
 )
+from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from db_logic import DatabaseManager, export_ddl_task, OBJECT_CATEGORIES, validate_table_exports, own_object_name, merge_package_selections
 from git_backup import protect_secret, reveal_secret, validate_git_config, upload_backup
@@ -145,6 +146,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("数据库 DDL 备份工具")
+        self.setWindowIcon(QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "backup.ico")))
         self.resize(820, 880)
         self.profiles = {}       # {name: {user, password, conn_str, export_dir, selected_objects}}
         self.current_profile = ""
@@ -923,6 +925,8 @@ class MainWindow(QMainWindow):
         except Exception as error:
             QMessageBox.critical(self, "Git 配置错误", str(error))
             return
+        if not self._prompt_git_message(options):
+            return
         self.btn_git_upload.setEnabled(False)
         self.btn_export.setEnabled(False)
         self.btn_all_export.setEnabled(False)
@@ -930,6 +934,16 @@ class MainWindow(QMainWindow):
         self.git_worker.log.connect(self.log_output.append)
         self.git_worker.finished.connect(self.on_git_upload_finished)
         self.git_worker.start()
+
+    def _prompt_git_message(self, options):
+        if not options.get("enabled"):
+            return True
+        message, accepted = QInputDialog.getMultiLineText(
+            self, "本次 Git 更新说明", "请输入此次更新说明（留空使用默认说明）：", ""
+        )
+        if accepted:
+            options["commit_message"] = message.strip()
+        return accepted
 
     def on_git_upload_finished(self, success, message):
         self.btn_git_upload.setEnabled(True)
@@ -1060,6 +1074,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "导出配置错误", str(e))
             return
+        if not self._prompt_git_message(git_config):
+            return
         self.btn_export.setText("停止导出")
         self.btn_export.setStyleSheet(
             "background-color: #f44336; color: white; font-weight: bold; "
@@ -1121,6 +1137,14 @@ class MainWindow(QMainWindow):
         if not self.profiles:
             QMessageBox.warning(self, "提示", "没有任何已保存的配置")
             return
+        profiles = {name: dict(profile, git=dict(profile.get("git", {})))
+                    for name, profile in self.profiles.items()}
+        git_options = {"enabled": any(p["git"].get("enabled") and p.get("export_dir", "").strip()
+                                      for p in profiles.values())}
+        if not self._prompt_git_message(git_options):
+            return
+        for profile in profiles.values():
+            profile["git"]["commit_message"] = git_options.get("commit_message", "")
         missing = [n for n, p in self.profiles.items() if not p.get("export_dir", "").strip()]
         if missing:
             self.log_output.append(f"注意：以下配置未设置备份目录，将跳过：{', '.join(missing)}")
@@ -1134,7 +1158,7 @@ class MainWindow(QMainWindow):
         self.btn_git_upload.setEnabled(False)
         self.progress_bar.setValue(0)
         self.log_output.clear()
-        self.all_worker = AllProfilesWorker(dict(self.profiles))
+        self.all_worker = AllProfilesWorker(profiles)
         self.all_worker.progress.connect(self.progress_bar.setValue)
         self.all_worker.log.connect(self.log_output.append)
         self.all_worker.finished.connect(self.on_all_export_finished)

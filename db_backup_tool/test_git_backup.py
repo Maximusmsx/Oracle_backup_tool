@@ -19,6 +19,7 @@ from dulwich.server import DictBackend
 from dulwich.web import make_wsgi_chain
 from git_backup import (GitBackupError, upload_backup, protect_secret, reveal_secret,
                         validate_git_config)
+import git_backup
 import db_logic
 
 
@@ -96,6 +97,50 @@ class GitBackupTest(unittest.TestCase):
             self.assertEqual(head, self.repo.refs[b"refs/heads/main"])
         self.assertEqual(reveal_secret(self.options["password_protected"]), "example-secret")
         self.assertNotIn("example-secret", json.dumps(self.options))
+
+    def test_git_pool_follows_system_proxy_and_bypass(self):
+        proxies = {"https": "http://127.0.0.1:7890"}
+        with patch("git_backup.getproxies", return_value=proxies), \
+                patch("git_backup.proxy_bypass", return_value=False), \
+                patch("git_backup.ProxyManager") as proxy, \
+                patch("git_backup.PoolManager") as direct:
+            git_backup.create_git_pool("https://github.com/example/repo.git")
+            proxy.assert_called_once()
+            self.assertEqual(proxy.call_args.args, (proxies["https"],))
+            direct.assert_not_called()
+        with patch("git_backup.getproxies", return_value=proxies), \
+                patch("git_backup.proxy_bypass", return_value=True), \
+                patch("git_backup.ProxyManager") as proxy, \
+                patch("git_backup.PoolManager") as direct:
+            git_backup.create_git_pool("https://internal.example/repo.git")
+            direct.assert_called_once()
+            proxy.assert_not_called()
+
+    def test_git_pool_without_proxy_and_scheme_specific_selection(self):
+        for proxies in ({}, {"https": "http://127.0.0.1:7890"}):
+            with self.subTest(proxies=proxies), \
+                    patch("git_backup.getproxies", return_value=proxies), \
+                    patch("git_backup.proxy_bypass", return_value=False), \
+                    patch("git_backup.PoolManager") as direct:
+                git_backup.create_git_pool("http://internal.example/repo.git")
+                direct.assert_called_once()
+
+    def test_upload_uses_shared_git_pool(self):
+        from urllib3 import PoolManager
+        pool = PoolManager(retries=False)
+        with patch("git_backup.create_git_pool", return_value=pool) as create:
+            self.assertIn("上传成功", upload_backup(self.backup, self.options, Mock()))
+        create.assert_called_once_with(self.options["url"].strip())
+
+    def test_custom_commit_message_and_blank_fallback(self):
+        options = dict(self.options, commit_message="  修复计税逻辑\n补充测试  ")
+        upload_backup(self.backup, options, Mock())
+        commit = self.repo[self.repo.refs[b"refs/heads/main"]]
+        self.assertEqual(commit.message.decode("utf-8"), "修复计税逻辑\n补充测试")
+        (self.backup / "TABLE" / "旧表.sql").write_text("select 2;", encoding="utf-8")
+        upload_backup(self.backup, dict(self.options, commit_message="  "), Mock())
+        commit = self.repo[self.repo.refs[b"refs/heads/main"]]
+        self.assertTrue(commit.message.startswith(b"Oracle backup "))
 
     def test_preserve_other_folders_dates_and_create_branch(self):
         self.seed({"README.md": b"keep", "backups/学校A/2000-01-01/TABLE/OLD.sql": b"old",

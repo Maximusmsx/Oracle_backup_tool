@@ -11,6 +11,8 @@ params = [
     "--clean",
     "--noconfirm",
     "--name=数据库备份工具",
+    f"--icon={os.path.join(current_dir, 'assets', 'backup.ico')}",
+    f"--add-data={os.path.join(current_dir, 'assets')}{os.pathsep}assets",
     f"--distpath={os.path.join(current_dir, 'dist')}",
     f"--workpath={os.path.join(current_dir, 'build_pack')}",
     f"--specpath={current_dir}",
