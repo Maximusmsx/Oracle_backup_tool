@@ -83,6 +83,51 @@ class LocalComparisonTest(unittest.TestCase):
         self.assertEqual(Path(generate_comparison(self.root, True, {}, Mock())), output)
         self.assertFalse(list(output.parent.glob("*.tmp")))
 
+    def test_deleted_code_shows_old_content_without_after_section(self):
+        for deleted in ("  RETURN 'old';\n", "  RETURN 'old';\n\n  RETURN 'other';\n"):
+            with self.subTest(deleted=repr(deleted)):
+                report = render_report(
+                    {"FUNCTION/F.sql": "BEGIN\n" + deleted + "END;\n"},
+                    {"FUNCTION/F.sql": "BEGIN\nEND;\n"},
+                    "old", "new", datetime.datetime.now())
+                change = report.split("**差异 1：", 1)[1]
+                self.assertIn("删除修改前第 2", change)
+                self.assertIn("修改前：\n", change)
+                self.assertIn("```sql\n" + deleted + "```", change)
+                self.assertNotIn("修改后：", change)
+                self.assertNotIn("（无）", change)
+
+        report = render_report({"FUNCTION/F.sql": "old\n"}, {},
+                               "old", "new", datetime.datetime.now())
+        change = report.split("## F【当前目录缺失】", 1)[1]
+        self.assertIn("修改前：\n```sql\nold\n```", change)
+        self.assertNotIn("修改后：", change)
+
+    def test_blank_line_changes_do_not_count_as_modified_objects(self):
+        for old, new in (("\nBEGIN\n\n  \nEND;\n\n", "BEGIN\nEND;\n"),
+                         ("BEGIN\nEND;\n", "\nBEGIN\n\t\nEND;\n\n"),
+                         (" \n\t\n", "")):
+            with self.subTest(old=repr(old), new=repr(new)):
+                report = render_report({"FUNCTION/F.sql": old}, {"FUNCTION/F.sql": new},
+                                       "old", "new", datetime.datetime.now())
+                self.assertIn("未发现差异", report)
+                self.assertIn("修改 0 个对象", report)
+                self.assertNotIn("## F", report)
+
+    def test_blank_lines_are_ignored_when_matching_but_original_line_numbers_are_kept(self):
+        report = render_report(
+            {"FUNCTION/F.sql": "\nBEGIN\n\n  v := 1;\n\nEND;\n"},
+            {"FUNCTION/F.sql": "BEGIN\n  v := 2;\nEND;\n\n"},
+            "old", "new", datetime.datetime.now())
+        self.assertIn("共 1 处差异", report)
+        self.assertIn("修改前第 4 行 → 修改后第 2 行，替换 1 行为 1 行代码", report)
+        self.assertIn("```sql\n  v := 1;\n```", report)
+        self.assertIn("```sql\n  v := 2;\n```", report)
+        report = render_report({"FUNCTION/F.sql": "BEGIN\n  v := 1;\nEND;\n"},
+                               {"FUNCTION/F.sql": "BEGIN\n v := 1;\nEND;\n"},
+                               "old", "new", datetime.datetime.now())
+        self.assertIn("共 1 处差异", report)
+
     def test_invalid_modes_dates_empty_and_bad_sql_preserve_existing_report(self):
         with self.assertRaisesRegex(CompareError, "无法对比"):
             generate_comparison(self.root, False, {}, Mock())

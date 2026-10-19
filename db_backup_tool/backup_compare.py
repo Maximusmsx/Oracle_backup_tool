@@ -149,19 +149,35 @@ def _code(lines):
         fence += "`"
     suffix = "\n（该片段最后一行在原文件中没有末尾换行符。）\n" if not content.endswith("\n") else ""
     displayed = content if content.endswith("\n") else content + "\n"
-    return f"{fence}sql\n{displayed}{fence}\n{suffix}"
+    note = f"（该片段为 {len(lines)} 行空白行，以下保留原始内容。）\n\n" if not content.strip() else ""
+    return f"{note}{fence}sql\n{displayed}{fence}\n{suffix}"
+
+
+def _changes(before, after):
+    # Match nonblank lines, then map each changed range back to the original file.
+    old_rows = [i for i, line in enumerate(before) if line.strip()] + [len(before)]
+    new_rows = [i for i, line in enumerate(after) if line.strip()] + [len(after)]
+    matcher = difflib.SequenceMatcher(None, [before[i] for i in old_rows[:-1]],
+                                     [after[i] for i in new_rows[:-1]], autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag != "equal":
+            yield (tag, old_rows[i1], old_rows[i2 - 1] + 1 if i2 > i1 else old_rows[i1],
+                   new_rows[j1], new_rows[j2 - 1] + 1 if j2 > j1 else new_rows[j1])
 
 
 def render_report(previous, current, previous_label, current_label, now):
+    changes = {name: list(_changes(previous[name].splitlines(keepends=True),
+                                  current[name].splitlines(keepends=True)))
+               for name in previous.keys() & current.keys() if previous[name] != current[name]}
     changed = [name for name in sorted(previous.keys() | current.keys())
-               if previous.get(name) != current.get(name)]
+               if name not in previous or name not in current or changes.get(name)]
     added = sum(name not in previous for name in changed)
     missing = sum(name not in current for name in changed)
     modified = len(changed) - added - missing
     report = ["数据库对象修改说明\n", f"生成时间：{now:%Y-%m-%d %H:%M:%S}\n",
               f"修改前：{previous_label}\n", f"修改后：{current_label}\n",
               f"汇总：修改 {modified} 个对象，新增 {added} 个对象，当前目录缺失 {missing} 个对象。\n",
-              "比较范围：对象类型及 DATA 目录内的 SQL 文件；忽略 BOM 和换行格式差异。行号从 1 开始。\n"]
+              "比较范围：对象类型及 DATA 目录内的 SQL 文件；忽略 BOM、换行格式及空白行增删差异。行号按原文件从 1 开始。\n"]
     if not changed:
         report.append("未发现差异。\n")
         return "\n".join(report)
@@ -182,10 +198,10 @@ def render_report(previous, current, previous_label, current_label, now):
             lines = after if status == "新增" else before
             report.append(f"{'新增' if status == '新增' else '历史文件'}共 {len(lines)} 行。\n")
             report.append("修改前：\n" + _code(before))
-            report.append("修改后：\n" + _code(after))
+            if status == "新增":
+                report.append("修改后：\n" + _code(after))
             continue
-        opcodes = [op for op in difflib.SequenceMatcher(None, before, after, autojunk=False).get_opcodes()
-                   if op[0] != "equal"]
+        opcodes = changes[name]
         report.append(f"共 {len(opcodes)} 处差异。\n")
         for index, (tag, i1, i2, j1, j2) in enumerate(opcodes, 1):
             if tag == "replace":
@@ -196,7 +212,8 @@ def render_report(previous, current, previous_label, current_label, now):
                 description = f"新增修改后第 {_range(j1, j2)} 行，共 {j2-j1} 行代码"
             report.append(f"**差异 {index}：{description}。**\n")
             report.append("修改前：\n" + _code(before[i1:i2]))
-            report.append("修改后：\n" + _code(after[j1:j2]))
+            if tag != "delete":
+                report.append("修改后：\n" + _code(after[j1:j2]))
     return "\n".join(report)
 
 
