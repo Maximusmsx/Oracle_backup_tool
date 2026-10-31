@@ -5,13 +5,15 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QFileDialog, QTreeWidget,
     QTreeWidgetItem, QProgressBar, QMessageBox, QTextEdit, QComboBox,
-    QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QGroupBox, QInputDialog
+    QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QGroupBox, QInputDialog,
+    QDialog, QDialogButtonBox
 )
-from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QIcon, QDesktopServices
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl
 from db_logic import DatabaseManager, export_ddl_task, OBJECT_CATEGORIES, validate_table_exports, own_object_name, merge_package_selections
 from git_backup import protect_secret, reveal_secret, validate_git_config, upload_backup
 from backup_compare import generate_comparison
+from backup_restore import scan_backup, restore_backup
 
 PLACEHOLDER_DATA = "__placeholder__"
 
@@ -140,6 +142,57 @@ class CompareWorker(QThread):
             self.finished.emit(True, path)
         except Exception as error:
             self.finished.emit(False, str(error))
+
+
+class RestoreWorker(QThread):
+    progress = pyqtSignal(int)
+    log = pyqtSignal(str)
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, config, directory, selected_types):
+        super().__init__()
+        self.config, self.directory, self.selected_types = config, directory, selected_types
+
+    def run(self):
+        try:
+            message = restore_backup(self.config, self.directory, self.selected_types,
+                                     self.progress.emit, self.log.emit)
+            self.finished.emit(True, message)
+        except Exception as error:
+            self.finished.emit(False, str(error))
+
+
+class RestoreDialog(QDialog):
+    def __init__(self, directory, available, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("选择恢复对象类型")
+        self.resize(480, 480)
+        layout = QVBoxLayout(self)
+        label = QLabel(f"备份目录：{directory}\n勾选需要恢复的类型（PACKAGE 包含声明和包体）：")
+        label.setWordWrap(True)
+        layout.addWidget(label)
+        self.types = QTreeWidget()
+        self.types.setHeaderLabels(["对象类型", "SQL 文件数"])
+        self.types.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.types.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for kind, files in available.items():
+            item = QTreeWidgetItem(self.types, [kind, str(len(files))])
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(0, Qt.CheckState.Unchecked)
+        layout.addWidget(self.types)
+        note = QLabel("恢复对象定义；不导入 DATA 表数据。可替换对象覆盖现有定义；表、索引、序列等只创建，存在时会报错，不自动删除。其他特殊对象类型暂不支持。")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("开始恢复")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def selected_types(self):
+        return [self.types.topLevelItem(i).text(0) for i in range(self.types.topLevelItemCount())
+                if self.types.topLevelItem(i).checkState(0) == Qt.CheckState.Checked]
 
 
 class MainWindow(QMainWindow):
@@ -352,8 +405,21 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.tabs)
         # 按钮行
         btn_row = QHBoxLayout()
+        self.btn_restore = QPushButton("恢复备份")
+        self.btn_restore.clicked.connect(self.start_restore)
+        btn_row.addWidget(self.btn_restore)
         btn_row.addStretch()
         self.btn_compare = QPushButton("生成修改说明")
+        self.btn_compare.setStyleSheet(
+            "QPushButton { background-color: #0F766E; color: white; font-size: 13px; "
+            "font-weight: bold; min-height: 30px; min-width: 120px; padding: 0 10px; "
+            "border: 1px solid #0B5E58; border-radius: 4px; } "
+            "QPushButton:hover { background-color: #115E59; } "
+            "QPushButton:pressed { background-color: #134E4A; } "
+            "QPushButton:focus { border: 2px solid #083F3B; } "
+            "QPushButton:disabled { background-color: #E2E8F0; color: #64748B; "
+            "border-color: #CBD5E1; }"
+        )
         self.btn_compare.setToolTip("按日：最新日期对比前一日期；仅 Git：当前备份对比远端上一个版本。")
         self.btn_compare.clicked.connect(self.start_comparison)
         btn_row.addWidget(self.btn_compare)
@@ -915,6 +981,8 @@ class MainWindow(QMainWindow):
         return options
 
     def start_git_upload(self):
+        if self._restore_running():
+            return
         if getattr(self, "compare_worker", None) and self.compare_worker.isRunning():
             QMessageBox.warning(self, "对比进行中", "请等待对比结束后再上传。")
             return
@@ -960,7 +1028,77 @@ class MainWindow(QMainWindow):
         if d:
             self.dir_path.setText(d)
 
+    def _restore_running(self):
+        if getattr(self, "restore_worker", None) and self.restore_worker.isRunning():
+            QMessageBox.warning(self, "恢复进行中", "请等待数据库恢复结束。")
+            return True
+        return False
+
+    def start_restore(self):
+        if any(getattr(self, name, None) and getattr(self, name).isRunning()
+               for name in ("worker", "all_worker", "git_worker", "compare_worker", "restore_worker")):
+            QMessageBox.warning(self, "任务进行中", "请等待当前任务结束后再恢复。")
+            return
+        config = {"user": self.u_name.text().strip(), "password": self.u_pwd.text(),
+                  "conn_str": self.conn_str.text().strip()}
+        if not all(config.values()):
+            QMessageBox.warning(self, "连接配置不完整", "请先填写要恢复到的数据库连接配置。")
+            return
+        directory = QFileDialog.getExistingDirectory(self, "选择要恢复的备份日期目录（yyyy-mm-dd）",
+                                                     self.dir_path.text().strip())
+        if not directory:
+            return
+        try:
+            available = scan_backup(directory)
+            if not available:
+                raise ValueError("该目录没有可恢复的对象 SQL，请选择包含 PACKAGE、FUNCTION 等类型子目录的日期目录。")
+        except Exception as error:
+            QMessageBox.warning(self, "无法恢复", str(error))
+            return
+        dialog = RestoreDialog(directory, available, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected = dialog.selected_types()
+        if not selected:
+            QMessageBox.warning(self, "未选择类型", "请至少勾选一种对象类型。")
+            return
+        count = sum(len(available[kind]) for kind in selected)
+        reply = QMessageBox.warning(self, "确认恢复到当前数据库",
+            f"目标：{config['user']}@{config['conn_str']}\n备份：{directory}\n"
+            f"对象类型：{', '.join(selected)}\nSQL 文件数：{count}\n\n"
+            "将执行备份 DDL，覆盖可替换对象的定义；显式源 schema 限定名映射到目标用户。\n"
+            "Oracle DDL 自动提交，不能回滚。发生错误将停止，已执行的修改保留。\n确定开始恢复？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._restore_disabled_widgets = [self.combo_profile, self.btn_save_profile, self.btn_delete_profile,
+            self.u_name, self.u_pwd, self.conn_str, self.btn_connect, self.btn_restore,
+            self.btn_export, self.btn_all_export, self.btn_compare, self.btn_git_upload,
+            self.tree, self.tabs]
+        for widget in self._restore_disabled_widgets:
+            widget.setEnabled(False)
+        self.progress_bar.setValue(0)
+        self.log_output.clear()
+        self.restore_worker = RestoreWorker(config, directory, selected)
+        self.restore_worker.progress.connect(self.progress_bar.setValue)
+        self.restore_worker.log.connect(self.log_output.append)
+        self.restore_worker.finished.connect(self.on_restore_finished)
+        self.restore_worker.start()
+
+    def on_restore_finished(self, success, message):
+        for widget in self._restore_disabled_widgets:
+            widget.setEnabled(True)
+        self._loaded_table_identity = None
+        self._build_tree(saved_selections=self._collect_selections())
+        self.log_output.append(message)
+        if success:
+            QMessageBox.information(self, "恢复完成", message)
+        else:
+            QMessageBox.critical(self, "恢复未完成", message)
+
     def start_comparison(self):
+        if self._restore_running():
+            return
         if any(getattr(self, name, None) and getattr(self, name).isRunning()
                for name in ("worker", "all_worker", "git_worker", "compare_worker")):
             QMessageBox.warning(self, "任务进行中", "请等待当前任务结束后再生成修改说明。")
@@ -992,7 +1130,8 @@ class MainWindow(QMainWindow):
         self.btn_all_export.setEnabled(True)
         self.btn_git_upload.setEnabled(True)
         if success:
-            QMessageBox.information(self, "修改说明已生成", f"修改说明已保存到：\n{message}")
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(message))):
+                QMessageBox.warning(self, "无法打开修改说明", f"修改说明已保存，但无法使用系统默认应用打开，请手动打开：\n{message}")
         else:
             self.log_output.append(message)
             QMessageBox.warning(self, "无法对比", message)
@@ -1054,6 +1193,8 @@ class MainWindow(QMainWindow):
         self.log_output.append("正在停止，请稍候...")
 
     def start_export(self):
+        if self._restore_running():
+            return
         if getattr(self, "compare_worker", None) and self.compare_worker.isRunning():
             QMessageBox.warning(self, "对比进行中", "请等待对比结束后再导出。")
             return
@@ -1131,6 +1272,8 @@ class MainWindow(QMainWindow):
         self.log_output.append("正在停止，请稍候...")
 
     def start_all_export(self):
+        if self._restore_running():
+            return
         if getattr(self, "compare_worker", None) and self.compare_worker.isRunning():
             QMessageBox.warning(self, "对比进行中", "请等待对比结束后再导出。")
             return
@@ -1202,8 +1345,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if any(getattr(self, name, None) and getattr(self, name).isRunning()
-               for name in ("worker", "all_worker", "git_worker", "compare_worker")):
-            QMessageBox.warning(self, "任务进行中", "请等待备份、上传或对比结束后再关闭程序。")
+               for name in ("worker", "all_worker", "git_worker", "compare_worker", "restore_worker")):
+            QMessageBox.warning(self, "任务进行中", "请等待备份、恢复、上传或对比结束后再关闭程序。")
             event.ignore()
             return
         if self.db_manager:

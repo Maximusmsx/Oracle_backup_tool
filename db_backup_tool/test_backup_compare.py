@@ -148,6 +148,51 @@ class LocalComparisonTest(unittest.TestCase):
             generate_comparison(self.root, True, {}, Mock())
         self.assertEqual(existing.read_text(encoding="utf-8"), "keep existing report")
 
+    def test_trailing_spaces_and_tabs_do_not_count_as_changes(self):
+        report = render_report(
+            {"PACKAGE/P.sql": "-- comment  \nBEGIN\t \n  v := 1;    \nEND;\n"},
+            {"PACKAGE/P.sql": "-- comment\nBEGIN\n  v := 1;\nEND;\n"},
+            "old", "new", datetime.datetime.now())
+        self.assertIn("未发现差异", report)
+        self.assertIn("修改 0 个对象", report)
+        self.assertNotIn("## P", report)
+
+    def test_only_generated_data_header_timestamp_is_ignored(self):
+        old = "prompt PL/SQL Developer import file\nprompt Created on 2026-10-22 18:00:19\n"
+        new = "prompt PL/SQL Developer import file\nprompt Created on 2026-10-23 13:17:06\n"
+        report = render_report({"DATA/T.sql": old}, {"DATA/T.sql": new},
+                               "old", "new", datetime.datetime.now())
+        self.assertIn("未发现差异", report)
+        for name, prefix in (("FUNCTION/F.sql", ""), ("DATA/T.sql", "-- custom header\n")):
+            report = render_report({name: prefix + old}, {name: prefix + new},
+                                   "old", "new", datetime.datetime.now())
+            self.assertIn("共 1 处差异", report)
+
+    def test_literal_content_changes_are_preserved(self):
+        for old, new in (("v := 'a b';\n", "v := 'ab';\n"),
+                         ("v := 'a  \nb';\n", "v := 'a\nb';\n"),
+                         ("v := q'[a  \nb]';\n", "v := q'[a\nb]';\n"),
+                         ("v := q'!a  \nb!';\n", "v := q'!a\nb!';\n"),
+                         ("v := 'a\n\nb';\n", "v := 'a\nb';\n"),
+                         ('select "a  \nb" from dual;\n', 'select "a\nb" from dual;\n')):
+            with self.subTest(old=repr(old)):
+                report = render_report({"FUNCTION/F.sql": old}, {"FUNCTION/F.sql": new},
+                                       "old", "new", datetime.datetime.now())
+                self.assertIn("共 1 处差异", report)
+
+    def test_real_change_keeps_original_lines_and_snippets_after_filtering(self):
+        old = ("prompt PL/SQL Developer import file\nprompt Created on 2026-10-22 18:00:19\n"
+               "-- don't change  \n\ninsert into T values ('a', 1);  \n")
+        new = ("prompt PL/SQL Developer import file\nprompt Created on 2026-10-23 13:17:06\n"
+               "-- don't change\ninsert into T values ('a', 2);\n")
+        report = render_report({"DATA/T.sql": old}, {"DATA/T.sql": new},
+                               "old", "new", datetime.datetime.now())
+        self.assertIn("共 1 处差异", report)
+        self.assertIn("修改前第 5 行 → 修改后第 4 行", report)
+        self.assertIn("```sql\ninsert into T values ('a', 1);  \n```", report)
+        self.assertIn("```sql\ninsert into T values ('a', 2);\n```", report)
+        self.assertNotIn("prompt Created on", report)
+
 
 class GitComparisonTest(unittest.TestCase):
     # Reuse the existing authenticated HTTP Git fixture, without inheriting its tests.
@@ -268,7 +313,7 @@ class ComparisonUiTest(unittest.TestCase):
             window.git_group.setChecked(True)
             with patch.object(main, "DatabaseManager", side_effect=AssertionError("No database")), \
                     patch.object(window, "_collect_git_config", side_effect=AssertionError("No Git config needed")), \
-                    patch.object(main.QMessageBox, "information") as complete:
+                    patch.object(main.QDesktopServices, "openUrl", return_value=True) as complete:
                 window.btn_compare.click()
                 self.assertFalse(window.btn_export.isEnabled())
                 self.assertFalse(window.btn_compare.isEnabled())

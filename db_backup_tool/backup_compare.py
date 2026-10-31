@@ -3,6 +3,7 @@ import datetime
 import difflib
 import os
 from pathlib import Path, PurePosixPath
+import re
 import tempfile
 
 from dulwich.client import get_transport_and_path, HTTPUnauthorized
@@ -153,12 +154,43 @@ def _code(lines):
     return f"{note}{fence}sql\n{displayed}{fence}\n{suffix}"
 
 
-def _changes(before, after):
-    # Match nonblank lines, then map each changed range back to the original file.
-    old_rows = [i for i, line in enumerate(before) if line.strip()] + [len(before)]
-    new_rows = [i for i, line in enumerate(after) if line.strip()] + [len(after)]
-    matcher = difflib.SequenceMatcher(None, [before[i] for i in old_rows[:-1]],
-                                     [after[i] for i in new_rows[:-1]], autojunk=False)
+_SQL_TOKENS = re.compile(
+    r"--[^\n]*|/\*.*?(?:\*/|\Z)|"
+    r"(?i:n?q)'(?:\[.*?\]'|\{.*?\}'|\(.*?\)'|<.*?>'|(?P<delimiter>[^\s]).*?(?P=delimiter)')|"
+    r"'(?:''|[^'])*(?:'|\Z)|\"(?:\"\"|[^\"])*(?:\"|\Z)", re.DOTALL)
+
+
+def _comparison_rows(lines, ignore_export_time):
+    # Protect whitespace inside multiline SQL literals and quoted identifiers.
+    literals = (m for m in _SQL_TOKENS.finditer("".join(lines))
+                if not m.group().startswith(("--", "/*")))
+    literal = next(literals, None)
+    timestamp_row = None
+    if (ignore_export_time and len(lines) > 1
+            and lines[0].strip() == "prompt PL/SQL Developer import file"
+            and re.fullmatch(r"prompt Created on \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", lines[1].strip())):
+        timestamp_row = 1
+    rows, keys = [], []
+    offset = 0
+    for i, line in enumerate(lines):
+        body = line[:-1] if line.endswith("\n") else line
+        end = offset + len(body)
+        while literal is not None and literal.end() <= end:
+            literal = next(literals, None)
+        protected = literal is not None and literal.start() <= end < literal.end()
+        key = line if protected else body.rstrip(" \t") + ("\n" if line.endswith("\n") else "")
+        if (key.strip() or protected) and i != timestamp_row:
+            rows.append(i)
+            keys.append(key)
+        offset += len(line)
+    return rows + [len(lines)], keys
+
+
+def _changes(before, after, ignore_export_time=False):
+    # Match comparison keys, then map each changed range to the original file.
+    old_rows, old_keys = _comparison_rows(before, ignore_export_time)
+    new_rows, new_keys = _comparison_rows(after, ignore_export_time)
+    matcher = difflib.SequenceMatcher(None, old_keys, new_keys, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag != "equal":
             yield (tag, old_rows[i1], old_rows[i2 - 1] + 1 if i2 > i1 else old_rows[i1],
@@ -167,7 +199,8 @@ def _changes(before, after):
 
 def render_report(previous, current, previous_label, current_label, now):
     changes = {name: list(_changes(previous[name].splitlines(keepends=True),
-                                  current[name].splitlines(keepends=True)))
+                                  current[name].splitlines(keepends=True),
+                                  ignore_export_time=name.startswith("DATA/")))
                for name in previous.keys() & current.keys() if previous[name] != current[name]}
     changed = [name for name in sorted(previous.keys() | current.keys())
                if name not in previous or name not in current or changes.get(name)]
@@ -177,7 +210,8 @@ def render_report(previous, current, previous_label, current_label, now):
     report = ["数据库对象修改说明\n", f"生成时间：{now:%Y-%m-%d %H:%M:%S}\n",
               f"修改前：{previous_label}\n", f"修改后：{current_label}\n",
               f"汇总：修改 {modified} 个对象，新增 {added} 个对象，当前目录缺失 {missing} 个对象。\n",
-              "比较范围：对象类型及 DATA 目录内的 SQL 文件；忽略 BOM、换行格式及空白行增删差异。行号按原文件从 1 开始。\n"]
+              "比较范围：对象类型及 DATA 目录内的 SQL 文件；忽略 BOM、换行格式、空白行增删、行尾空格和 Tab，"
+              "以及 DATA 文件固定头部的导出时间；字符串和带引号标识符内的空白保留。行号按原文件从 1 开始。\n"]
     if not changed:
         report.append("未发现差异。\n")
         return "\n".join(report)

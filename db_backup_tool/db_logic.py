@@ -106,7 +106,7 @@ def init_thick_mode():
             "解决方法：\n"
             "① 从 Oracle 官网下载 Windows x64 Instant Client Basic：\n"
             "   https://www.oracle.com/database/technologies/instant-client/winx64-64-downloads.html\n"
-            "② 解压后将文件夹（如 instantclient_21_3）放到 C:\\oracle\\ 下，\n"
+            "② 解压后将 19c 客户端文件夹（如 instantclient_19_32）放到 C:\\oracle\\ 下，\n"
             "   或直接放在本程序 exe 同目录的 oracle_client\\ 文件夹中\n"
             "③ 重新启动本程序后再连接"
         )

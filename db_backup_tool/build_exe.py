@@ -27,14 +27,20 @@ params = [
     "--hidden-import=cryptography.hazmat.backends.openssl.backend",
 ]
 
-# 如果本目录下存在 oracle_client 文件夹且包含 oci.dll，则一并打包进 exe
+# 只打包 Client 19 Basic 的 OCI 运行库及许可文件，避免带入工具、符号和备用库。
 oracle_client_dir = os.path.join(current_dir, "oracle_client")
 if os.path.isfile(os.path.join(oracle_client_dir, "oci.dll")):
-    params.append(f"--add-data={oracle_client_dir}{os.pathsep}oracle_client")
-    print(f"[INFO] 检测到 oracle_client/ 目录，Oracle Client 将内嵌到 exe 中")
+    runtime_files = ("oci.dll", "oraociei19.dll", "orannzsbb19.dll", "oraons.dll",
+                     "BASIC_LICENSE", "BASIC_README")
+    for name in runtime_files:
+        path = os.path.join(oracle_client_dir, name)
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Oracle Client 19 Basic 运行文件缺失：{name}")
+        params.append(f"--add-data={path}{os.pathsep}oracle_client")
+    print("[INFO] 将内嵌 Oracle Client 19 Basic 的 OCI 运行库及许可文件")
 else:
     print("[INFO] 未检测到 oracle_client/ 目录，exe 不内嵌 Oracle Client")
-    print("       如需支持 Oracle 11g 且目标机器无客户端，请将 Instant Client Basic Lite")
+    print("       如需支持 Oracle 11g 且目标机器无客户端，请将 Instant Client 19 Basic")
     print("       的所有文件解压到 db_backup_tool/oracle_client/ 后重新打包")
 
 if __name__ == "__main__":

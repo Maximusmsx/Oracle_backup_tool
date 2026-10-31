@@ -30,13 +30,25 @@ Git 密码／Token 通过 Windows DPAPI 加密保存，绑定当前 Windows 用�
 
 ## 修改说明对比
 
-备份完成后点击“生成修改说明”。比较只读取备份 SQL 和 Git 历史，不连接数据库，不提交或推送 Git。
+备份完成后点击“生成修改说明”，生成成功后自动用系统默认应用打开报告；无法打开时提示文件路径，可手动打开。比较只读取备份 SQL 和 Git 历史，不连接数据库，不提交或推送 Git。
 
 - 勾选“按日建目录”：最新 `yyyy-mm-dd` 目录与前一个日期目录比较，报告保存为最新目录下的 `此次修改说明.md`；两项都勾选时优先使用日期目录。
 - 仅勾选 Git：当前备份根目录与配置分支、仓库子目录的远端版本比较。若当前 SQL 与远端最新版本一致，沿第一父提交寻找该子目录上一个不同的版本，跳过其他配置的提交。历史 SQL 下载到 `git_compare/提交号_随机标识/`，报告保存为根目录下的 `GIT差异描述yyyymmdd-hh-mm-ss.md`。
 - 两项都未勾选、没有上一个日期／Git 备份版本、备份目录为空或 SQL 包含导出错误时，提示无法对比。
 
 报告一级标题为对象目录，二级标题为对象名称，只列出新增、修改和当前目录缺失的对象。修改内容按差异位置给出原、新行号及修改前后的 SQL；忽略 UTF-8 BOM 和换行格式差异。完全一致时只写“未发现差异”。当前目录缺失不代表数据库删除对象，也可能是导出范围改变。每个日期只有一份备份，同日多次导出的历史无法通过日期模式恢复。
+
+## 从备份恢复对象
+
+点击“恢复备份”，选择具体的按日目录（例如 `备份目录/2026-10-30`，其中直接包含 `PACKAGE`、`FUNCTION` 等子目录），勾选对象类型后确认目标数据库。恢复使用界面当前填写的用户名、密码和连接串，与导出页的对象勾选、筛选条件无关。类型列表显示 SQL 文件数，默认不勾选。
+
+支持 PACKAGE、FUNCTION、PROCEDURE、TYPE、TYPE BODY、TRIGGER、TABLE、INDEX、VIEW、MATERIALIZED VIEW、SEQUENCE、SYNONYM、LIBRARY、CLUSTER；PACKAGE 包含声明和包体，先创建所有包声明再创建包体。兼容历史独立 PACKAGE_BODY 目录，同名 PACKAGE 已存在时跳过重复包体文件。暂不恢复 DATA 表数据及 JOB、数据库链接、Java 等特殊对象。
+
+可 `CREATE OR REPLACE` 的对象覆盖当前定义；表、索引、序列、物化视图、簇只尝试创建，已存在时停止并报告，不自动删除或清空。TABLE 备份附带的注释和索引会执行；跳过本次建表约束已自动生成的索引，以及同时勾选 INDEX 时的重复索引。
+
+DDL 中显式的源对象所属 schema 限定名映射到目标用户；字符串、注释和其他 schema 引用保持原文，因此动态 SQL 内写死的源 schema、表空间、外部依赖仍需自行核对。恢复前先读取和检查全部选中文件，导出错误、空文件、未闭合字符串及不支持的脚本会阻止启动数据库操作。
+
+**Oracle DDL 自动提交，不能回滚。** 确认窗口会显示目标连接、源目录、类型和文件数。执行发生错误时停止，日志记录已完成的数量与失败文件，之前成功的修改保留。恢复期间不可切换连接或关闭程序。执行后仅尝试重新编译本次恢复的对象并查询 `USER_OBJECTS` / `USER_ERRORS`；仍为 INVALID 的对象报告恢复未完成。编译通过不代表业务回归通过。实际恢复前请保留当前数据库的独立备份。
 
 ## 运行
 
@@ -62,4 +74,6 @@ cd db_backup_tool
 
 在项目根目录运行 `run_build.ps1`，或在安装依赖后运行 `db_backup_tool/build_exe.py`。EXE 输出到 `db_backup_tool/dist`。
 
-如需支持 Oracle 11g，在 `db_backup_tool/oracle_client` 放入适合目标数据库的 Oracle Instant Client（包括 `oci.dll`）后打包。打包脚本会将客户端嵌入 EXE；客户端文件和生成文件不提交到仓库。
+当前分发版本内置 Windows x64 Oracle Instant Client 19.32 Basic，兼顾 Oracle 11.2 和高版本数据库，完整 Basic 包支持中文字符集。客户端来自 [Oracle 官方下载页](https://www.oracle.com/database/technologies/instant-client/winx64-64-downloads.html)，原始包 `instantclient-basic-windows.x64-19.32.0.0.0dbru.zip` 的 SHA-256 为 `e95a66eb4e69e2fb28880cbd252e8eab9807b877c4248c0d50a28f7b75cfe878`。
+
+重新打包时，将同一版本完整客户端（包括 `oci.dll`）放入 `db_backup_tool/oracle_client`，不要混放不同版本 DLL。打包脚本只嵌入 OCI 运行所需的 `oci.dll`、`oraociei19.dll`、`orannzsbb19.dll`、`oraons.dll` 及许可、版本说明文件，保留完整字符集，不打包备用库、调试符号或 Java/C++ 工具组件。原始客户端目录保留完整下载内容；客户端文件和生成文件不提交到仓库。
