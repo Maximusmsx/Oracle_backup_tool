@@ -1,0 +1,139 @@
+1183 INFO: PyInstaller: 6.6.0, contrib hooks: 2026.6
+1184 INFO: Python: 3.12.14
+1240 INFO: Platform: Windows-10-10.0.19045-SP0
+1242 INFO: wrote D:\E-CloudBack\Desktop\GPT\自动代码生成项目\数据库获取备份工具\db_backup_tool\数据库备份工具.spec
+1247 INFO: Removing temporary files and cleaning cache in C:\Users\admin\AppData\Local\pyinstaller
+7343 INFO: Extending PYTHONPATH with paths
+['D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool']
+8039 INFO: Appending 'datas' from .spec
+8069 INFO: checking Analysis
+8070 INFO: Building Analysis because Analysis-00.toc is non existent
+8070 INFO: Running Analysis Analysis-00.toc
+8070 INFO: Target bytecode optimization level: 0
+8070 INFO: Initializing module dependency graph...
+8081 INFO: Caching module graph hooks...
+8164 INFO: Analyzing base_library.zip ...
+11216 INFO: Loading module hook 'hook-encodings.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+16099 INFO: Loading module hook 'hook-pickle.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+19139 INFO: Loading module hook 'hook-heapq.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+22658 INFO: Caching module dependency graph...
+22882 INFO: Looking for Python shared library...
+22957 INFO: Using Python shared library: C:\Users\admin\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python312.dll
+22957 INFO: Analyzing D:\E-CloudBack\Desktop\GPT\自动代码生成项目\数据库获取备份工具\db_backup_tool\main.py
+23231 INFO: Loading module hook 'hook-PyQt6.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+23528 INFO: Loading module hook 'hook-PyQt6.QtWidgets.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+24653 INFO: Loading module hook 'hook-PyQt6.QtGui.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+28261 INFO: Loading module hook 'hook-PyQt6.QtCore.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+31486 INFO: Loading module hook 'hook-urllib3.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'...
+33582 INFO: Loading module hook 'hook-difflib.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+34403 INFO: Loading module hook 'hook-platform.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+35523 INFO: Loading module hook 'hook-multiprocessing.util.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+35830 INFO: Loading module hook 'hook-xml.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+38152 INFO: Analyzing hidden import 'uuid'
+38208 INFO: Analyzing hidden import 'cffi'
+38649 INFO: Loading module hook 'hook-pycparser.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'...
+39206 INFO: Loading module hook 'hook-setuptools.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+43389 INFO: Processing pre-safe import module hook distutils from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module\\hook-distutils.py'.
+45272 INFO: Loading module hook 'hook-distutils.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+45423 INFO: Loading module hook 'hook-packaging.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+45931 INFO: Loading module hook 'hook-sysconfig.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+46504 INFO: Loading module hook 'hook-distutils.util.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+49676 INFO: Analyzing hidden import 'cryptography'
+49693 INFO: Loading module hook 'hook-cryptography.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'...
+52406 INFO: hook-cryptography: cryptography does not seem to be using dynamically linked OpenSSL.
+52424 INFO: Analyzing hidden import 'cryptography.hazmat.primitives'
+52460 INFO: Analyzing hidden import 'cryptography.hazmat.backends'
+53147 INFO: Analyzing hidden import 'cryptography.cobblestone'
+53163 INFO: Analyzing hidden import 'cryptography.fernet'
+53233 INFO: Analyzing hidden import 'cryptography.hazmat.asn1'
+53292 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.asymmetric.dh'
+53317 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.asymmetric.dsa'
+53343 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.asymmetric.ed25519'
+53366 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.asymmetric.ed448'
+53389 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.asymmetric.mldsa'
+53426 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.asymmetric.mlkem'
+53455 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.asymmetric.types'
+53521 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.ciphers.aead'
+53537 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.cmac'
+53554 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.constant_time'
+53570 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.hpke'
+53588 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.kdf'
+53606 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.kdf.argon2'
+53625 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.kdf.concatkdf'
+53642 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.kdf.hkdf'
+53659 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.kdf.kbkdf'
+53681 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.kdf.pbkdf2'
+53698 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.kdf.scrypt'
+53714 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.kdf.x963kdf'
+53731 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.keywrap'
+53747 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.poly1305'
+53763 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.serialization'
+53907 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.serialization.pkcs12'
+54316 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.serialization.pkcs7'
+54407 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.twofactor'
+54425 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.twofactor.hotp'
+54456 INFO: Analyzing hidden import 'cryptography.hazmat.primitives.twofactor.totp'
+54478 INFO: Analyzing hidden import 'cryptography.x509.ocsp'
+54525 INFO: Analyzing hidden import 'dulwich.__main__'
+57914 INFO: Analyzing hidden import 'dulwich.cloud'
+57933 INFO: Analyzing hidden import 'dulwich.cloud.gcs'
+57961 INFO: Analyzing hidden import 'dulwich.contrib'
+57980 INFO: Analyzing hidden import 'dulwich.contrib.greenthreads'
+58010 INFO: Analyzing hidden import 'dulwich.contrib.paramiko_vendor'
+58042 INFO: Analyzing hidden import 'dulwich.contrib.release_robot'
+58069 INFO: Analyzing hidden import 'dulwich.contrib.requests_vendor'
+58108 INFO: Analyzing hidden import 'dulwich.contrib.swift'
+58212 INFO: Analyzing hidden import 'dulwich.fastexport'
+58260 INFO: Analyzing hidden import 'dulwich.lfs_server'
+58296 INFO: Analyzing hidden import 'dulwich.tests'
+58320 INFO: Analyzing hidden import 'dulwich.tests.test_object_store'
+59755 INFO: Analyzing hidden import 'dulwich.whitespace'
+59790 INFO: Processing module hooks...
+59791 WARNING: Hidden import "pycparser.lextab" not found!
+59792 WARNING: Hidden import "pycparser.yacctab" not found!
+59793 INFO: Loading module hook 'hook-distutils.command.check.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+59817 WARNING: Hidden import "pkg_resources" not found!
+59900 INFO: Loading module hook 'hook-setuptools.msvc.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+63690 INFO: Loading module hook 'hook-setuptools._distutils.command.check.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+64474 INFO: Performing binary vs. data reclassification (365 entries)
+76054 INFO: Looking for ctypes DLLs
+76162 INFO: Analyzing run-time hooks ...
+76170 INFO: Including run-time hook 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_inspect.py'
+76191 INFO: Including run-time hook 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pkgutil.py'
+76214 INFO: Processing pre-find module path hook _pyi_rth_utils from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path\\hook-_pyi_rth_utils.py'.
+76237 INFO: Loading module hook 'hook-_pyi_rth_utils.py' from 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks'...
+76240 INFO: Including run-time hook 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_multiprocessing.py'
+76263 INFO: Including run-time hook 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks\\pyi_rth_cryptography_openssl.py'
+76284 INFO: Including run-time hook 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_setuptools.py'
+76301 INFO: Including run-time hook 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pyqt6.py'
+76398 INFO: Looking for dynamic libraries
+78153 INFO: Extra DLL search directories (AddDllDirectory): ['D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyQt6\\Qt6\\bin']
+78153 INFO: Extra DLL search directories (PATH): ['D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\build_env\\Lib\\site-packages\\PyQt6\\Qt6\\bin']
+90910 WARNING: Library not found: could not resolve 'oraxml19.dll', dependency of 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\oracle_client\\orannzsbb19.dll'.
+90913 WARNING: Library not found: could not resolve 'oracore19.dll', dependency of 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\oracle_client\\orannzsbb19.dll'.
+90914 WARNING: Library not found: could not resolve 'oranls19.dll', dependency of 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\oracle_client\\orannzsbb19.dll'.
+90916 WARNING: Library not found: could not resolve 'orauts.dll', dependency of 'D:\\E-CloudBack\\Desktop\\GPT\\自动代码生成项目\\数据库获取备份工具\\db_backup_tool\\oracle_client\\orannzsbb19.dll'.
+91052 INFO: Warnings written to D:\E-CloudBack\Desktop\GPT\自动代码生成项目\数据库获取备份工具\db_backup_tool\build_pack\数据库备份工具\warn-数据库备份工具.txt
+91226 INFO: Graph cross-reference written to D:\E-CloudBack\Desktop\GPT\自动代码生成项目\数据库获取备份工具\db_backup_tool\build_pack\数据库备份工具\xref-数据库备份工具.html
+91404 INFO: checking PYZ
+91404 INFO: Building PYZ because PYZ-00.toc is non existent
+91404 INFO: Building PYZ (ZlibArchive) D:\E-CloudBack\Desktop\GPT\自动代码生成项目\数据库获取备份工具\db_backup_tool\build_pack\数据库备份工具\PYZ-00.pyz
+93563 INFO: Building PYZ (ZlibArchive) D:\E-CloudBack\Desktop\GPT\自动代码生成项目\数据库获取备份工具\db_backup_tool\build_pack\数据库备份工具\PYZ-00.pyz completed successfully.
+93736 INFO: checking PKG
+93737 INFO: Building PKG because PKG-00.toc is non existent
+93737 INFO: Building PKG (CArchive) 数据库备份工具.pkg
+167420 INFO: Building PKG (CArchive) 数据库备份工具.pkg completed successfully.
+167444 INFO: Bootloader D:\E-CloudBack\Desktop\GPT\自动代码生成项目\数据库获取备份工具\db_backup_tool\build_env\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+167444 INFO: checking EXE
+167445 INFO: Building EXE because EXE-00.toc is non existent
+167445 INFO: Building EXE from EXE-00.toc
+167448 INFO: Copying bootloader EXE to D:\E-CloudBack\Desktop\GPT\自动代码生成项目\数据库获取备份工具\db_backup_tool\dist\数据库备份工具.exe
+167833 INFO: Copying icon to EXE
+168045 INFO: Copying 0 resources to EXE
+168045 INFO: Embedding manifest in EXE
+168252 INFO: Appending PKG archive to EXE
+168402 INFO: Fixing EXE headers
+180875 INFO: Building EXE from EXE-00.toc completed successfully.
+[INFO] 将内嵌 Oracle Client 19 Basic 的 OCI 运行库及许可文件
+正在开始打包: D:\E-CloudBack\Desktop\GPT\自动代码生成项目\数据库获取备份工具\db_backup_tool\main.py
+打包完成！请在 dist 目录下查找 EXE 文件。
