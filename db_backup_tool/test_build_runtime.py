@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 import runpy
+import ssl
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -8,6 +10,20 @@ import PyInstaller.__main__
 
 
 class BuildRuntimeTest(unittest.TestCase):
+    def test_ssl_runtime_certificate_is_bundled_when_present(self):
+        with tempfile.TemporaryDirectory() as directory:
+            certificate = Path(directory) / "codex-rejected-cas.pem"
+            certificate.write_text("runtime certificate", encoding="ascii")
+            with patch.object(ssl, "__file__", str(Path(directory) / "ssl.py")):
+                result = runpy.run_path(str(Path(__file__).with_name("build_exe.py")))
+        self.assertIn(f"--add-data={certificate}{os.pathsep}.", result["params"])
+
+    def test_standard_ssl_runtime_does_not_require_extra_certificate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(ssl, "__file__", str(Path(directory) / "ssl.py")):
+                result = runpy.run_path(str(Path(__file__).with_name("build_exe.py")))
+        self.assertFalse(any("codex-rejected-cas.pem" in p for p in result["params"]))
+
     def test_only_oci_runtime_and_license_are_bundled(self):
         with patch("os.path.isfile", return_value=True):
             result = runpy.run_path(str(Path(__file__).with_name("build_exe.py")))

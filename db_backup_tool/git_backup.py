@@ -23,6 +23,20 @@ class GitBackupError(Exception):
     pass
 
 
+def _is_network_error(error):
+    # dulwich wraps transport failures in GitProtocolError; walk the chain for the real cause.
+    seen = set()
+    cause = error.__cause__ or error.__context__
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        if type(cause).__module__.split(".")[0] in ("urllib3", "http", "socket", "ssl"):
+            return True
+        if isinstance(cause, (ConnectionError, TimeoutError)):
+            return True
+        cause = cause.__cause__ or cause.__context__
+    return isinstance(error, (ConnectionError, TimeoutError))
+
+
 def create_git_pool(url):
     # PoolManager does not read Windows system or environment proxy settings.
     target = urlsplit(url)
@@ -196,6 +210,11 @@ def upload_backup(export_dir, options, log_callback, files=None, should_stop=Non
             if urlsplit(options["url"]).hostname.lower() == "github.com":
                 raise GitBackupError("GitHub 认证失败：请使用 GitHub 账号名＋有仓库写入权限的 Token，不能使用登录密码；本地备份已保留") from None
             raise GitBackupError("Git 服务认证失败，请检查用户名及密码／Token是否有效；本地备份已保留") from None
+        if _is_network_error(error):
+            host = urlsplit(options["url"]).hostname.lower()
+            hint = "（github.com 在国内网络下通常需要代理）" if host == "github.com" else ""
+            raise GitBackupError(f"无法连接 Git 服务器 {host}{hint}，请检查网络或开启代理／系统代理后重试"
+                                 f"（{type(error).__name__}）；凭据通常无问题，本地备份已保留") from None
         # HTTP errors may contain authentication values; do not display their raw text.
         raise GitBackupError(f"Git 上传失败（{type(error).__name__}），请检查网络、仓库地址和凭据；本地备份已保留") from None
     finally:

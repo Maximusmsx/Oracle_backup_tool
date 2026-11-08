@@ -1,5 +1,6 @@
 import PyInstaller.__main__
 import os
+import ssl
 
 current_dir = os.path.abspath(os.path.dirname(__file__))
 main_file = os.path.join(current_dir, "main.py")
@@ -26,6 +27,11 @@ params = [
     "--hidden-import=cryptography.hazmat.backends",
     "--hidden-import=cryptography.hazmat.backends.openssl.backend",
 ]
+
+# Some Python runtimes require this certificate beside their bundled ssl module.
+ssl_certificate = os.path.join(os.path.dirname(ssl.__file__), "codex-rejected-cas.pem")
+if os.path.isfile(ssl_certificate):
+    params.append(f"--add-data={ssl_certificate}{os.pathsep}.")
 
 # 只打包 Client 19 Basic 的 OCI 运行库及许可文件，避免带入工具、符号和备用库。
 oracle_client_dir = os.path.join(current_dir, "oracle_client")
