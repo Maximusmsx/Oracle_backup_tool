@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import json
 import os
 from PyQt6.QtWidgets import (
@@ -68,7 +68,7 @@ class AllProfilesWorker(QThread):
 
     def __init__(self, profiles):
         super().__init__()
-        self.profiles = profiles   # dict {name: profile_dict}
+        self.profiles = profiles   # dict {name: profile_dict}，仅包含勾选的配置
 
     def run(self):
         names = list(self.profiles.keys())
@@ -78,6 +78,13 @@ class AllProfilesWorker(QThread):
             if self.isInterruptionRequested():
                 self.finished.emit(True, f"已中止，已完成 {done}/{total} 个配置")
                 return
+            # 总进度按配置数分摊：每个配置占 100/total 的份额
+            base = idx * 100 // total
+            span = (idx + 1) * 100 // total - base
+
+            def share_progress(percent, base=base, span=span):
+                self.progress.emit(min(99, base + percent * span // 100))
+
             p = self.profiles[name]
             export_dir = p.get("export_dir", "").strip()
             if not export_dir:
@@ -94,7 +101,7 @@ class AllProfilesWorker(QThread):
             try:
                 msg = export_ddl_task(
                     db_cfg, export_dir, selected,
-                    self.progress.emit, self.log.emit,
+                    share_progress, self.log.emit,
                     should_stop=self.isInterruptionRequested,
                     name_filter=p.get("filter_text", "").strip(),
                     table_exports=p.get("table_exports", []),
@@ -105,7 +112,24 @@ class AllProfilesWorker(QThread):
                 done += 1
             except Exception as e:
                 self.log.emit(f"  [{name}] 导出失败：{e}")
+                continue
+            self._make_comparison(name, p)
+        self.progress.emit(100)
         self.finished.emit(done == total, f"所有配置处理完毕，成功 {done}/{total} 个；失败或跳过 {total-done} 个，详情见日志")
+
+    def _make_comparison(self, name, profile):
+        """导出成功后自动生成修改说明（等价于点击“生成修改说明”按钮），失败不中断后续配置。"""
+        daily = profile.get("daily_subdir", False)
+        git_options = profile.get("git", {}) or {}
+        if not daily and not git_options.get("enabled"):
+            self.log.emit(f"  [{name}] 未启用按日建目录或 Git 上传，跳过修改说明")
+            return
+        self.log.emit(f"  [{name}] 生成修改说明...")
+        try:
+            options = git_options if git_options.get("enabled") else {}
+            generate_comparison(profile.get("export_dir", "").strip(), daily, options, self.log.emit)
+        except Exception as e:
+            self.log.emit(f"  [{name}] 修改说明生成失败：{e}")
 
 
 class GitUploadWorker(QThread):
@@ -195,6 +219,67 @@ class RestoreDialog(QDialog):
                 if self.types.topLevelItem(i).checkState(0) == Qt.CheckState.Checked]
 
 
+class AllExportDialog(QDialog):
+    """导出所有配置前的选择弹框：列出全部配置并默认勾选上次的选择。"""
+
+    def __init__(self, profiles, last_selected, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("导出所有配置")
+        self.resize(560, 480)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("配置选择（默认勾选上次的选择）："))
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["配置", "备份目录", "Git 上传"])
+        header = self.tree.header()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.setRootIsDecorated(False)
+        default_all = last_selected is None    # 无记录时默认全选
+        saved = set(last_selected or [])
+        for name, profile in profiles.items():
+            git_on = bool((profile.get("git") or {}).get("enabled"))
+            item = QTreeWidgetItem(self.tree, [name, profile.get("export_dir", ""),
+                                               "是" if git_on else ""])
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            checked = True if default_all else name in saved
+            item.setCheckState(0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+        layout.addWidget(self.tree)
+
+        select_row = QHBoxLayout()
+        btn_all = QPushButton("全选")
+        btn_none = QPushButton("全不选")
+        btn_all.clicked.connect(lambda: self._set_all(Qt.CheckState.Checked))
+        btn_none.clicked.connect(lambda: self._set_all(Qt.CheckState.Unchecked))
+        select_row.addWidget(btn_all)
+        select_row.addWidget(btn_none)
+        select_row.addStretch()
+        layout.addLayout(select_row)
+
+        layout.addWidget(QLabel("github更新说明（留空使用默认说明）："))
+        self.message_edit = QTextEdit()
+        self.message_edit.setMaximumHeight(80)
+        layout.addWidget(self.message_edit)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("开始备份")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _set_all(self, state):
+        for i in range(self.tree.topLevelItemCount()):
+            self.tree.topLevelItem(i).setCheckState(0, state)
+
+    def selected_names(self):
+        return [self.tree.topLevelItem(i).text(0) for i in range(self.tree.topLevelItemCount())
+                if self.tree.topLevelItem(i).checkState(0) == Qt.CheckState.Checked]
+
+    def commit_message(self):
+        return self.message_edit.toPlainText().strip()
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -203,6 +288,7 @@ class MainWindow(QMainWindow):
         self.resize(820, 880)
         self.profiles = {}       # {name: {user, password, conn_str, export_dir, selected_objects}}
         self.current_profile = ""
+        self.all_export_last_selected = None   # 上次“导出所有配置”勾选的名字列表，None=无记录
         self.db_manager = None
         self._connection_identity = None
         self._loaded_table_identity = None
@@ -500,6 +586,7 @@ class MainWindow(QMainWindow):
 
         self.profiles = raw.get("profiles", {})
         last = raw.get("last_profile", "")
+        self.all_export_last_selected = raw.get("all_export_selected")
 
         self._populate_combo()
 
@@ -741,7 +828,8 @@ class MainWindow(QMainWindow):
         self.log_output.append(f"配置 [{name}] 已保存")
 
     def _write_config(self):
-        data = {"profiles": self.profiles, "last_profile": self.current_profile}
+        data = {"profiles": self.profiles, "last_profile": self.current_profile,
+                "all_export_selected": self.all_export_last_selected}
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
@@ -1280,17 +1368,26 @@ class MainWindow(QMainWindow):
         if not self.profiles:
             QMessageBox.warning(self, "提示", "没有任何已保存的配置")
             return
-        profiles = {name: dict(profile, git=dict(profile.get("git", {})))
-                    for name, profile in self.profiles.items()}
+        dialog = AllExportDialog(self.profiles, self.all_export_last_selected, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected_names = dialog.selected_names()
+        if not selected_names:
+            QMessageBox.warning(self, "提示", "请至少勾选一个配置")
+            return
+        self.all_export_last_selected = list(selected_names)
+        self._write_config()
+        profiles = {name: dict(self.profiles[name], git=dict(self.profiles[name].get("git", {})))
+                    for name in selected_names}
         git_options = {"enabled": any(p["git"].get("enabled") and p.get("export_dir", "").strip()
                                       for p in profiles.values())}
-        if not self._prompt_git_message(git_options):
-            return
+        commit_message = dialog.commit_message()
+        if git_options["enabled"] and not commit_message:
+            if not self._prompt_git_message(git_options):
+                return
+            commit_message = git_options.get("commit_message", "")
         for profile in profiles.values():
-            profile["git"]["commit_message"] = git_options.get("commit_message", "")
-        missing = [n for n, p in self.profiles.items() if not p.get("export_dir", "").strip()]
-        if missing:
-            self.log_output.append(f"注意：以下配置未设置备份目录，将跳过：{', '.join(missing)}")
+            profile["git"]["commit_message"] = commit_message
         self.btn_all_export.setText("停止")
         self.btn_all_export.setStyleSheet(
             "background-color: #f44336; color: white; font-weight: bold; "
@@ -1301,6 +1398,9 @@ class MainWindow(QMainWindow):
         self.btn_git_upload.setEnabled(False)
         self.progress_bar.setValue(0)
         self.log_output.clear()
+        missing = [n for n, p in profiles.items() if not p.get("export_dir", "").strip()]
+        if missing:
+            self.log_output.append(f"注意：以下配置未设置备份目录，将跳过：{', '.join(missing)}")
         self.all_worker = AllProfilesWorker(profiles)
         self.all_worker.progress.connect(self.progress_bar.setValue)
         self.all_worker.log.connect(self.log_output.append)
