@@ -13,6 +13,7 @@ class ComparisonOpenTest(unittest.TestCase):
                     patch.object(main.QDesktopServices, "openUrl", return_value=opened) as opener, \
                     patch.object(main.QMessageBox, "warning") as warning:
                 window = Mock()
+                window._open_comparison_report = lambda path: main.MainWindow._open_comparison_report(window, path)
                 message = path if success else "生成失败"
                 main.MainWindow.on_comparison_finished(window, success, message)
                 if success:

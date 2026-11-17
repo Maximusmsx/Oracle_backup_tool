@@ -50,16 +50,21 @@ class GitMessageTest(unittest.TestCase):
                     else:
                         factory.assert_not_called()
 
-    def test_batch_asks_once_and_does_not_save_message_in_profiles(self):
+    def test_batch_dialog_message_is_passed_without_saving_in_profiles(self):
         self.window.profiles = {"A": {"export_dir": self.temp.name, "git": {"enabled": True}},
                                 "B": {"export_dir": self.temp.name, "git": {"enabled": True}}}
-        for accepted in (True, False):
-            with self.subTest(accepted=accepted), \
-                    patch.object(main.QInputDialog, "getMultiLineText", return_value=("本批次更新", accepted)) as dialog, \
+        for result in (main.QDialog.DialogCode.Accepted, main.QDialog.DialogCode.Rejected):
+            with self.subTest(result=result), \
+                    patch.object(main, "AllExportDialog") as dialog, \
+                    patch.object(main.QInputDialog, "getMultiLineText") as prompt, \
                     patch.object(main, "AllProfilesWorker") as factory:
+                dialog.return_value.exec.return_value = result
+                dialog.return_value.selected_names.return_value = ["A", "B"]
+                dialog.return_value.commit_message.return_value = "本批次更新"
                 self.window.start_all_export()
                 dialog.assert_called_once()
-                if accepted:
+                prompt.assert_not_called()
+                if result == main.QDialog.DialogCode.Accepted:
                     for p in factory.call_args.args[0].values():
                         self.assertEqual(p["git"]["commit_message"], "本批次更新")
                 else:

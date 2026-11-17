@@ -1,11 +1,10 @@
-import json
 import os
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QApplication
 import main
 
@@ -38,66 +37,70 @@ class DialogTest(unittest.TestCase):
                 for i in range(dialog.tree.topLevelItemCount())}
 
     def test_no_record_defaults_to_all_checked(self):
-        dialog = main.AllExportDialog(self.profiles(), None)
+        dialog = main.AllExportDialog(self.profiles())
         self.assertEqual(set(states for states in self.states(dialog).values()),
                          {Qt.CheckState.Checked})
 
-    def test_last_selection_is_default_checked(self):
-        dialog = main.AllExportDialog(self.profiles(), ["配置1", "配置3"])
-        states = self.states(dialog)
-        self.assertEqual(states["配置1"], Qt.CheckState.Checked)
-        self.assertEqual(states["配置3"], Qt.CheckState.Checked)
-        self.assertEqual(states["配置2"], Qt.CheckState.Unchecked)
-        self.assertEqual(states["配置4"], Qt.CheckState.Unchecked)
-        self.assertEqual(dialog.selected_names(), ["配置1", "配置3"])
-
-    def test_select_all_and_none(self):
-        dialog = main.AllExportDialog(self.profiles(), ["配置1"])
-        dialog._set_all(Qt.CheckState.Unchecked)
-        self.assertEqual(dialog.selected_names(), [])
+    def test_select_all_and_invert(self):
+        dialog = main.AllExportDialog(self.profiles())
+        dialog.tree.topLevelItem(1).setCheckState(0, Qt.CheckState.Unchecked)
+        dialog._invert_selection()
+        self.assertEqual(dialog.selected_names(), ["配置2"])
         dialog._set_all(Qt.CheckState.Checked)
+        self.assertEqual(len(dialog.selected_names()), 4)
+        dialog._invert_selection()
+        self.assertEqual(dialog.selected_names(), [])
+        dialog._invert_selection()
         self.assertEqual(len(dialog.selected_names()), 4)
 
     def test_commit_message_is_stripped(self):
-        dialog = main.AllExportDialog(self.profiles(), None)
+        dialog = main.AllExportDialog(self.profiles())
         dialog.message_edit.setPlainText("  更新说明  \n")
         self.assertEqual(dialog.commit_message(), "更新说明")
 
 
-class SelectionPersistenceTest(unittest.TestCase):
+class ExportSelectionTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.config = patch.object(main, "CONFIG_FILE",
-                                   os.path.join(self.temp.name, "config.json"))
-        self.config.start()
+    def test_confirm_closes_dialog_and_starts_only_selected_profiles(self):
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(main, "CONFIG_FILE", os.path.join(folder, "config.json")):
+            window = main.MainWindow()
+            window.profiles = {"A": make_profile(folder, git_enabled=True),
+                               "B": make_profile(folder, git_enabled=True)}
+            dialog = main.AllExportDialog(window.profiles, window)
+            dialog.tree.topLevelItem(0).setCheckState(0, Qt.CheckState.Unchecked)
+            QTimer.singleShot(0, dialog.accept)
+            with patch.object(main, "AllExportDialog", return_value=dialog), \
+                 patch.object(main, "AllProfilesWorker") as factory, \
+                 patch.object(window, "_prompt_git_message") as prompt:
+                factory.return_value.isRunning.return_value = False
+                window.start_all_export()
+                self.assertFalse(dialog.isVisible())
+                profiles = factory.call_args.args[0]
+                self.assertEqual(list(profiles), ["B"])
+                self.assertEqual(profiles["B"]["git"]["commit_message"], "")
+                factory.return_value.start.assert_called_once()
+                prompt.assert_not_called()
+            window.close()
 
-    def tearDown(self):
-        self.config.stop()
-        self.temp.cleanup()
-
-    def test_selection_roundtrip_through_config_file(self):
-        window = main.MainWindow()
-        window.profiles = {"A": make_profile("/tmp/a"), "B": make_profile("/tmp/b")}
-        window.all_export_last_selected = ["B"]
-        window._write_config()
-        window.close()
-
-        with open(main.CONFIG_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        self.assertEqual(data["all_export_selected"], ["B"])
-
-        window2 = main.MainWindow()
-        self.assertEqual(window2.all_export_last_selected, ["B"])
-        window2.close()
-
-    def test_missing_key_means_no_record(self):
-        window = main.MainWindow()
-        self.assertIsNone(window.all_export_last_selected)
-        window.close()
+    def test_cancel_or_empty_selection_does_not_start_backup(self):
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(main, "CONFIG_FILE", os.path.join(folder, "config.json")):
+            window = main.MainWindow()
+            window.profiles = {"A": make_profile(folder)}
+            for result in (main.QDialog.DialogCode.Rejected, main.QDialog.DialogCode.Accepted):
+                dialog = Mock()
+                dialog.exec.return_value = result
+                dialog.selected_names.return_value = []
+                with patch.object(main, "AllExportDialog", return_value=dialog), \
+                     patch.object(main, "AllProfilesWorker") as factory, \
+                     patch.object(main.QMessageBox, "warning"):
+                    window.start_all_export()
+                    factory.assert_not_called()
+            window.close()
 
 
 class AllProfilesWorkerTest(unittest.TestCase):
@@ -156,6 +159,49 @@ class AllProfilesWorkerTest(unittest.TestCase):
             _, logs, results = self.run_worker(profiles)
         cmp.assert_not_called()
         self.assertFalse(results[0][0])
+
+    def test_git_batch_generates_after_upload_without_opening(self):
+        profiles = {"A": make_profile("/tmp/a", git_enabled=True),
+                    "B": make_profile("/tmp/b", git_enabled=True)}
+
+        def fake_export(*args, **kwargs):
+            kwargs["on_git_uploaded"]()
+            return "上传成功"
+
+        with patch.object(main, "export_ddl_task", side_effect=fake_export), \
+             patch.object(main, "generate_comparison", return_value="/tmp/report.md") as compare, \
+             patch.object(main.QDesktopServices, "openUrl") as opener:
+            _, _, results = self.run_worker(profiles)
+        self.assertEqual(compare.call_count, 2)
+        opener.assert_not_called()
+        self.assertTrue(results[0][0])
+
+    def test_git_cancel_does_not_generate_report(self):
+        with patch.object(main, "export_ddl_task", return_value="已取消上传"), \
+             patch.object(main, "generate_comparison") as compare:
+            self.run_worker({"A": make_profile("/tmp/a", daily=True, git_enabled=True)})
+        compare.assert_not_called()
+
+
+class CurrentProfileWorkerTest(unittest.TestCase):
+    def test_upload_then_report_signal_and_comparison_failure(self):
+        def fake_export(*args, **kwargs):
+            kwargs["on_git_uploaded"]()
+            return "上传成功"
+
+        for error in (None, Exception("没有历史版本")):
+            worker = main.BackupWorker({}, "/tmp/a", {}, git_config={"enabled": True})
+            reports, results, logs = [], [], []
+            worker.report_ready.connect(reports.append)
+            worker.finished.connect(lambda ok, msg: results.append(ok))
+            worker.log.connect(logs.append)
+            with patch.object(main, "export_ddl_task", side_effect=fake_export), \
+                 patch.object(main, "generate_comparison", return_value="/tmp/report.md", side_effect=error):
+                worker.run()
+            self.assertEqual(reports, [] if error else ["/tmp/report.md"])
+            self.assertEqual(results, [True])
+            if error:
+                self.assertTrue(any("修改说明生成失败" in line for line in logs))
 
 
 if __name__ == "__main__":

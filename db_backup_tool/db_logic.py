@@ -724,7 +724,7 @@ def validate_table_exports(config, table_exports):
 
 def export_ddl_task(config, export_dir, selected_objects, progress_callback, log_callback,
                     should_stop=None, name_filter="", table_exports=None, daily_subdir=False,
-                    git_config=None):
+                    git_config=None, on_git_uploaded=None):
     """
     Export selected DDL objects and optional table data scripts.
     selected_objects: {oracle_type: list_of_names or None}
@@ -850,6 +850,8 @@ def export_ddl_task(config, export_dir, selected_objects, progress_callback, log
                 raise Exception(f"本地备份已完成；{error}") from None
             log_callback(git_message)
             message += "\n" + git_message
+            if on_git_uploaded and not (should_stop and should_stop()):
+                on_git_uploaded()
         return message
     finally:
         db.close()

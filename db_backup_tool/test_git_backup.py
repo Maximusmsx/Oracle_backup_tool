@@ -206,21 +206,28 @@ class GitBackupTest(unittest.TestCase):
             self.assertTrue((self.backup / "TABLE" / "T.sql").exists())
             self.assertFalse(b"refs/heads/main" in self.repo.refs)
             with patch("git_backup.upload_backup") as upload:
+                uploaded = Mock()
                 message = db_logic.export_ddl_task({"user": "test", "password": "test", "conn_str": "test"},
                                                    str(self.backup), {"TABLE": ["T"]}, Mock(), Mock(),
-                                                   git_config=self.options, should_stop=lambda: True)
+                                                   git_config=self.options, should_stop=lambda: True,
+                                                   on_git_uploaded=uploaded)
                 self.assertIn("已中止", message)
                 upload.assert_not_called()
+                uploaded.assert_not_called()
 
     def test_successful_backup_autoupload_and_failure_keeps_files(self):
         db = Mock()
         db.connect.return_value = (True, "OK")
         db.get_ddl.return_value = "create table T (id number);"
         config = {"user": "test", "password": "test", "conn_str": "test"}
+        uploaded = Mock()
         with patch.object(db_logic, "DatabaseManager", return_value=db):
             message = db_logic.export_ddl_task(config, str(self.backup), {"TABLE": ["T"]},
-                                               Mock(), Mock(), daily_subdir=True, git_config=self.options)
+                                               Mock(), Mock(), daily_subdir=True, git_config=self.options,
+                                               on_git_uploaded=uploaded)
             self.assertIn("上传成功", message)
+            uploaded.assert_called_once_with()
+            uploaded.reset_mock()
             date = datetime.date.today().isoformat()
             self.assertIn("backups/学校A/TABLE/T.sql", self.remote_files())
             self.assertNotIn(f"backups/学校A/{date}/TABLE/T.sql", self.remote_files())
@@ -229,7 +236,9 @@ class GitBackupTest(unittest.TestCase):
             wrong = dict(self.options, password_protected=protect_secret("bad-password"))
             with self.assertRaisesRegex(Exception, "本地备份已完成"):
                 db_logic.export_ddl_task(config, str(self.backup), {"TABLE": ["T"]},
-                                         Mock(), Mock(), daily_subdir=True, git_config=wrong)
+                                         Mock(), Mock(), daily_subdir=True, git_config=wrong,
+                                         on_git_uploaded=uploaded)
+            uploaded.assert_not_called()
             self.assertTrue((self.backup / date / "TABLE" / "T.sql").exists())
             self.assertTrue((self.backup / "TABLE" / "T.sql").exists())
 
